@@ -404,7 +404,7 @@ struct HamiltonianQC<S, FL, typename S::is_sz_t> : Hamiltonian<S, FL> {
                 i = op.site_index[0];
                 s = op.site_index.ss();
                 if (!S::pg_equal(
-                        0, S::pg_mul(orb_sym[i], S::pg_inv(orb_sym[m]))) ||
+                        0, S::pg_mul(orb_sym[m], S::pg_inv(orb_sym[i]))) ||
                     (abs(t(s, i, m)) < TINY &&
                      abs(v(s, 0, i, m, m, m)) < TINY &&
                      abs(v(s, 1, i, m, m, m)) < TINY))
@@ -523,6 +523,59 @@ struct HamiltonianQC<S, FL, typename S::is_sz_t> : Hamiltonian<S, FL> {
                                 vacuum)),
                             p.second, -v(sp, s, m, m, m, i));
                     }
+                }
+                break;
+            case OpNames::HSOC:
+                j = op.site_index[0];
+                s = op.site_index.ss();
+                if (!S::pg_equal(j,
+                                 S::pg_mul(orb_sym[m], S::pg_inv(orb_sym[m]))))
+                    p.second = zero;
+                else if (!(delayed & DelayedOpNames::H)) {
+                    p.second = make_shared<SparseMatrix<S, FL>>(d_alloc);
+                    p.second->allocate(info);
+                    (*p.second)[S(0, 0, 0)](0, 0) = 0.0;
+                    if (s == 0) {
+                        (*p.second)[S(1, -1, orb_sym[m])](0, 0) =
+                            t(1 | 2, m, m);
+                        (*p.second)[S(1, 1, orb_sym[m])](0, 0) = t(0 | 0, m, m);
+                        (*p.second)[S(2, 0, S::pg_mul(orb_sym[m], orb_sym[m]))](
+                            0, 0) = t(0 | 0, m, m) + t(1 | 2, m, m);
+                    } else if (s == 1)
+                        (*p.second)[S(1, -1, orb_sym[m])](0, 0) =
+                            t(0 | 2, m, m);
+                    else
+                        (*p.second)[S(1, 1, orb_sym[m])](0, 0) = t(1 | 0, m, m);
+                }
+                break;
+            case OpNames::RSOC:
+                i = op.site_index[0];
+                j = op.site_index[1];
+                s = op.site_index.ss();
+                if (!S::pg_equal(
+                        j, S::pg_mul(orb_sym[m], S::pg_inv(orb_sym[i]))) ||
+                    abs(t(s, i, m)) < TINY)
+                    p.second = zero;
+                else if (!(delayed & DelayedOpNames::R)) {
+                    p.second = make_shared<SparseMatrix<S, FL>>(nullptr);
+                    p.second->allocate(info,
+                                       op_prims[s >> 1].at(OpNames::D)->data);
+                    p.second->factor *= t(s, i, m);
+                }
+                break;
+            case OpNames::RDSOC:
+                i = op.site_index[0];
+                j = op.site_index[1];
+                s = op.site_index.ss();
+                if (!S::pg_equal(
+                        j, S::pg_mul(orb_sym[i], S::pg_inv(orb_sym[m]))) ||
+                    abs(t((s >> 1) | ((s & 1) << 1), m, i)) < TINY)
+                    p.second = zero;
+                else if (!(delayed & DelayedOpNames::RD)) {
+                    p.second = make_shared<SparseMatrix<S, FL>>(nullptr);
+                    p.second->allocate(info,
+                                       op_prims[s >> 1].at(OpNames::C)->data);
+                    p.second->factor *= t((s >> 1) | ((s & 1) << 1), m, i);
                 }
                 break;
             case OpNames::P:
