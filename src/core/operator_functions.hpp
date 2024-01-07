@@ -139,7 +139,9 @@ template <typename S, typename FL> struct OperatorFunctions {
         if (abs(b->factor * scale) < TINY)
             return;
         if (a->info == b->info && !conj) {
-            if (seq->mode != SeqTypes::None && seq->mode != SeqTypes::Tasked)
+            if (!seq_type_is_trivial(seq->mode) &&
+                (!(seq->mode & SeqTypes::Tasked) ||
+                 (seq->mode & SeqTypes::Simple)))
                 seq->iadd(GMatrix<FL>(a->data, 1, (MKL_INT)a->total_memory),
                           GMatrix<FL>(b->data, 1, (MKL_INT)b->total_memory),
                           scale * b->factor, false, a->factor);
@@ -160,8 +162,9 @@ template <typename S, typename FL> struct OperatorFunctions {
                         scale * (conj ? xconj<FL>(b->factor) : b->factor);
                     if (conj)
                         factor *= cg->transpose_cg(bdq, bra, ket);
-                    if (seq->mode != SeqTypes::None &&
-                        seq->mode != SeqTypes::Tasked)
+                    if (!seq_type_is_trivial(seq->mode) &&
+                        (!(seq->mode & SeqTypes::Tasked) ||
+                         (seq->mode & SeqTypes::Simple)))
                         seq->iadd((*a)[ia], (*b)[ib], factor, conj, a->factor);
                     else
                         GMatrixFunctions<FL>::iadd((*a)[ia], (*b)[ib], factor,
@@ -195,7 +198,9 @@ template <typename S, typename FL> struct OperatorFunctions {
             S cqprime = c->info->quanta[ic].get_ket();
             int ibra = rot_bra->info->find_state(cq);
             int iket = rot_ket->info->find_state(cqprime);
-            if (seq->mode != SeqTypes::None && seq->mode != SeqTypes::Tasked)
+            if (!seq_type_is_trivial(seq->mode) &&
+                (!(seq->mode & SeqTypes::Tasked) ||
+                 (seq->mode & SeqTypes::Simple)))
                 seq->rotate((*a)[ia], (*c)[ic], (*rot_bra)[ibra], !trans | 2,
                             (*rot_ket)[iket], trans, scale);
             else
@@ -233,7 +238,7 @@ template <typename S, typename FL> struct OperatorFunctions {
         for (int il = ixa; il < ixb; il++) {
             int ia = cinfo->ia[il], ib = cinfo->ib[il], ic = cinfo->ic[il];
             double factor = cinfo->factor[il];
-            if (seq->mode != SeqTypes::None)
+            if (!seq_type_is_trivial(seq->mode))
                 seq->tensor_product_diagonal(conj, (*a)[ia], (*b)[ib], (*c)[ic],
                                              scale * (FP)factor);
             else
@@ -304,7 +309,7 @@ template <typename S, typename FL> struct OperatorFunctions {
                     int ida = dinfo->ia[idl], idb = dinfo->ib[idl];
                     uint64_t stride = dinfo->stride[idl];
                     double dfactor = dinfo->factor[idl];
-                    if (seq->mode != SeqTypes::None) {
+                    if (!seq_type_is_trivial(seq->mode)) {
                         seq->three_tensor_product_diagonal(
                             conj, (*a)[ia], (*b)[ib], (*c)[ic], (*da)[ida],
                             dconj & 1, (*db)[idb], (dconj & 2) >> 1, dleft,
@@ -395,7 +400,7 @@ template <typename S, typename FL> struct OperatorFunctions {
                 ib <= abcv[il - 1].first[1])
                 seq->simple_perform();
             double factor = abcv[il].second;
-            if (seq->mode != SeqTypes::None)
+            if (!seq_type_is_trivial(seq->mode))
                 seq->left_partial_rotate((*a)[ia], conj & 1, (*b)[ib],
                                          (conj & 2) >> 1, (*v)[iv], (*c)[ic],
                                          scale * (FP)factor);
@@ -455,7 +460,7 @@ template <typename S, typename FL> struct OperatorFunctions {
                 ia <= abcv[il - 1].first[0])
                 seq->simple_perform();
             double factor = abcv[il].second;
-            if (seq->mode != SeqTypes::None)
+            if (!seq_type_is_trivial(seq->mode))
                 seq->right_partial_rotate((*b)[ib], (conj & 2) >> 1, (*a)[ia],
                                           conj & 1, (*v)[iv], (*c)[ic],
                                           scale * (FP)factor);
@@ -504,7 +509,7 @@ template <typename S, typename FL> struct OperatorFunctions {
             double factor = cinfo->factor[il];
             switch (tt) {
             case TraceTypes::None:
-                if (seq->mode != SeqTypes::None)
+                if (!seq_type_is_trivial(seq->mode))
                     seq->rotate((*c)[ic], (*v)[iv], (*a)[ia],
                                 (conj & 1) ? 3 : 0, (*b)[ib],
                                 (conj & 2) ? 2 : 1, scale * (FP)factor);
@@ -514,7 +519,7 @@ template <typename S, typename FL> struct OperatorFunctions {
                         (*b)[ib], (conj & 2) ? 2 : 1, scale * (FP)factor);
                 break;
             case TraceTypes::Left:
-                if (seq->mode != SeqTypes::None)
+                if (!seq_type_is_trivial(seq->mode))
                     seq->multiply((*c)[ic], false, (*b)[ib], (conj & 2) ? 2 : 1,
                                   (*v)[iv], scale * (FP)factor, 1.0);
                 else
@@ -523,7 +528,7 @@ template <typename S, typename FL> struct OperatorFunctions {
                                                    scale * (FP)factor, 1.0);
                 break;
             case TraceTypes::Right:
-                if (seq->mode != SeqTypes::None)
+                if (!seq_type_is_trivial(seq->mode))
                     seq->multiply((*a)[ia], (conj & 1) ? 3 : 0, (*c)[ic], false,
                                   (*v)[iv], scale * (FP)factor, 1.0);
                 else
@@ -607,7 +612,7 @@ template <typename S, typename FL> struct OperatorFunctions {
                     double dfactor = dinfo->factor[idl];
                     switch (tt) {
                     case TraceTypes::None:
-                        if (seq->mode != SeqTypes::None)
+                        if (!seq_type_is_trivial(seq->mode))
                             seq->three_rotate(
                                 (*c)[ic], (*v)[iv], (*a)[ia], conj & 1,
                                 (*b)[ib], !(conj & 2), (*da)[ida], dconj & 1,
@@ -623,7 +628,7 @@ template <typename S, typename FL> struct OperatorFunctions {
                                     stride);
                         break;
                     case TraceTypes::Left:
-                        if (seq->mode != SeqTypes::None)
+                        if (!seq_type_is_trivial(seq->mode))
                             seq->three_rotate_tr_left(
                                 (*c)[ic], (*v)[iv], (*a)[ia], conj & 1,
                                 (*b)[ib], !(conj & 2), (*da)[ida], dconj & 1,
@@ -639,7 +644,7 @@ template <typename S, typename FL> struct OperatorFunctions {
                                     stride);
                         break;
                     case TraceTypes::Right:
-                        if (seq->mode != SeqTypes::None)
+                        if (!seq_type_is_trivial(seq->mode))
                             seq->three_rotate_tr_right(
                                 (*c)[ic], (*v)[iv], (*a)[ia], conj & 1,
                                 (*b)[ib], !(conj & 2), (*da)[ida], dconj & 1,
@@ -695,7 +700,9 @@ template <typename S, typename FL> struct OperatorFunctions {
             int ia = cinfo->ia[il], ib = cinfo->ib[il], ic = cinfo->ic[il];
             uint64_t stride = cinfo->stride[il];
             double factor = cinfo->factor[il];
-            if (seq->mode != SeqTypes::None && seq->mode != SeqTypes::Tasked)
+            if (!seq_type_is_trivial(seq->mode) &&
+                (!(seq->mode & SeqTypes::Tasked) ||
+                 (seq->mode & SeqTypes::Simple)))
                 seq->tensor_product((*a)[ia], conj & 1, (*b)[ib],
                                     (conj & 2) >> 1, (*c)[ic],
                                     scale * (FP)factor, stride);

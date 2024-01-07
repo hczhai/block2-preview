@@ -420,7 +420,7 @@ struct HamiltonianQC<S, FL, typename S::is_sz_t> : Hamiltonian<S, FL> {
                             op_prims[s + (sp << 1)].at(OpNames::R));
                         tmp->factor = v(s, sp, i, m, m, m);
                         opf->iadd(p.second, tmp);
-                        if (opf->seq->mode != SeqTypes::None)
+                        if (!seq_type_is_trivial(opf->seq->mode))
                             opf->seq->simple_perform();
                     }
                     tmp->deallocate();
@@ -447,7 +447,7 @@ struct HamiltonianQC<S, FL, typename S::is_sz_t> : Hamiltonian<S, FL> {
                             op_prims[s + (sp << 1)].at(OpNames::RD));
                         tmp->factor = v(s, sp, m, i, m, m);
                         opf->iadd(p.second, tmp);
-                        if (opf->seq->mode != SeqTypes::None)
+                        if (!seq_type_is_trivial(opf->seq->mode))
                             opf->seq->simple_perform();
                     }
                     tmp->deallocate();
@@ -572,7 +572,7 @@ struct HamiltonianQC<S, FL, typename S::is_sz_t> : Hamiltonian<S, FL> {
                                 op_prims[sp | (sp << 1)].at(OpNames::B));
                             tmp->factor = v(s & 1, sp, i, j, m, m);
                             opf->iadd(p.second, tmp);
-                            if (opf->seq->mode != SeqTypes::None)
+                            if (!seq_type_is_trivial(opf->seq->mode))
                                 opf->seq->simple_perform();
                         }
                         tmp->deallocate();
@@ -777,7 +777,7 @@ struct HamiltonianQC<S, FL, typename S::is_su2_t> : Hamiltonian<S, FL> {
                 find_site_op_info(m, S(0, 0, 0)));
             opf->product(0, op_prims[1][OpNames::B], op_prims[1][OpNames::B],
                          op_prims[1][OpNames::NN]);
-            if (opf->seq->mode != SeqTypes::None)
+            if (!seq_type_is_trivial(opf->seq->mode))
                 opf->seq->simple_perform();
             op_prims[0][OpNames::R] = make_shared<SparseMatrix<S, FL>>(d_alloc);
             op_prims[0][OpNames::R]->allocate(
@@ -946,7 +946,7 @@ struct HamiltonianQC<S, FL, typename S::is_su2_t> : Hamiltonian<S, FL> {
                     tmp->copy_data_from(op_prims[0].at(OpNames::R));
                     tmp->factor = v(i, m, m, m);
                     opf->iadd(p.second, tmp);
-                    if (opf->seq->mode != SeqTypes::None)
+                    if (!seq_type_is_trivial(opf->seq->mode))
                         opf->seq->simple_perform();
                     tmp->deallocate();
                 }
@@ -967,7 +967,7 @@ struct HamiltonianQC<S, FL, typename S::is_su2_t> : Hamiltonian<S, FL> {
                     tmp->copy_data_from(op_prims[0].at(OpNames::RD));
                     tmp->factor = v(m, i, m, m);
                     opf->iadd(p.second, tmp);
-                    if (opf->seq->mode != SeqTypes::None)
+                    if (!seq_type_is_trivial(opf->seq->mode))
                         opf->seq->simple_perform();
                     tmp->deallocate();
                 }
@@ -1335,7 +1335,7 @@ struct HamiltonianQC<S, FL, typename S::is_sg_t> : Hamiltonian<S, FL> {
                     tmp->copy_data_from(op_prims[0].at(OpNames::R));
                     tmp->factor = v(i, m, m, m);
                     opf->iadd(p.second, tmp);
-                    if (opf->seq->mode != SeqTypes::None)
+                    if (!seq_type_is_trivial(opf->seq->mode))
                         opf->seq->simple_perform();
                     tmp->deallocate();
                 }
@@ -1356,7 +1356,7 @@ struct HamiltonianQC<S, FL, typename S::is_sg_t> : Hamiltonian<S, FL> {
                     tmp->copy_data_from(op_prims[0].at(OpNames::RD));
                     tmp->factor = v(m, i, m, m);
                     opf->iadd(p.second, tmp);
-                    if (opf->seq->mode != SeqTypes::None)
+                    if (!seq_type_is_trivial(opf->seq->mode))
                         opf->seq->simple_perform();
                     tmp->deallocate();
                 }

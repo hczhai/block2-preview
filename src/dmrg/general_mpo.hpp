@@ -1241,7 +1241,7 @@ template <typename S, typename FL> struct GeneralMPO : MPO<S, FL> {
                         shared_ptr<SparseMatrix<S, FL>> gmat =
                             gmats.at(mmat->info->delta_quantum);
                         hamil->opf->iadd(gmat, mmat, x->factor);
-                        if (hamil->opf->seq->mode != SeqTypes::None)
+                        if (!seq_type_is_trivial(hamil->opf->seq->mode))
                             hamil->opf->seq->simple_perform();
                     }
                     if (gmats.size() == 1) {

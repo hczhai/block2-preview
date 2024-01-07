@@ -1643,7 +1643,7 @@ struct MPOQC<S, FL, typename S::is_sz_t> : MPO<S, FL> {
                 this->unload_right_operators(pm);
             }
         SeqTypes seqt = hamil->opf->seq->mode;
-        hamil->opf->seq->mode = SeqTypes::None;
+        hamil->opf->seq->mode = seq_type_make_trivial(seqt);
         const uint16_t m_start = hamil->get_n_orbs_left() > 0 ? 1 : 0;
         const uint16_t m_end =
             hamil->get_n_orbs_right() > 0 ? n_sites - 1 : n_sites;
@@ -2682,7 +2682,7 @@ struct MPOQC<S, FL, typename S::is_su2_t> : MPO<S, FL> {
                 this->unload_right_operators(pm);
             }
         SeqTypes seqt = hamil->opf->seq->mode;
-        hamil->opf->seq->mode = SeqTypes::None;
+        hamil->opf->seq->mode = seq_type_make_trivial(seqt);
         const uint16_t m_start = hamil->get_n_orbs_left() > 0 ? 1 : 0;
         const uint16_t m_end =
             hamil->get_n_orbs_right() > 0 ? n_sites - 1 : n_sites;
@@ -3604,7 +3604,7 @@ struct MPOQC<S, FL, typename S::is_sg_t> : MPO<S, FL> {
                 this->unload_right_operators(pm);
             }
         SeqTypes seqt = hamil->opf->seq->mode;
-        hamil->opf->seq->mode = SeqTypes::None;
+        hamil->opf->seq->mode = seq_type_make_trivial(seqt);
         const uint16_t m_start = hamil->get_n_orbs_left() > 0 ? 1 : 0;
         const uint16_t m_end =
             hamil->get_n_orbs_right() > 0 ? n_sites - 1 : n_sites;

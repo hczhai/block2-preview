@@ -22,6 +22,7 @@ template <typename FL> class TestMatrix : public ::testing::Test {
         cout << "seed = " << sd << endl;
         Random::rand_seed(sd);
         frame_<FL>() = make_shared<DataFrame<FL>>(isize, dsize, "nodex");
+        // threading_()->seq_type = SeqTypes::SimdTasked;
     }
     void TearDown() override {
         frame_<FL>()->activate(0);

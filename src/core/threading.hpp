@@ -129,9 +129,11 @@ enum struct SeqTypes : uint8_t {
                 //!< step, ``SeqTypes::Tasked`` has no effect and it
                 //!< is equivalent to ``SeqTypes::None``.
                 //!< The ``cblas_dgemm_batch`` is not used in this mode.
-    SimpleTasked = 5 //!< This is the same as ``SeqTypes::Tasked`` for
-                     //!< the Davidson matrix-vector step, and the same as
-                     //!< ``SeqTypes::Simple`` for other steps.
+    SimpleTasked = 5, //!< This is the same as ``SeqTypes::Tasked`` for
+                      //!< the Davidson matrix-vector step, and the same as
+                      //!< ``SeqTypes::Simple`` for other steps.
+    Simd = 8,
+    SimdTasked = 12
 };
 
 inline bool operator&(SeqTypes a, SeqTypes b) {
@@ -140,6 +142,14 @@ inline bool operator&(SeqTypes a, SeqTypes b) {
 
 inline SeqTypes operator|(SeqTypes a, SeqTypes b) {
     return SeqTypes((uint8_t)a | (uint8_t)b);
+}
+
+inline bool seq_type_is_trivial(SeqTypes x) noexcept {
+    return x == SeqTypes::None || x == SeqTypes::Simd;
+}
+
+inline SeqTypes seq_type_make_trivial(SeqTypes x) noexcept {
+    return (x & SeqTypes::Simd) ? SeqTypes::Simd : SeqTypes::None;
 }
 
 /**
@@ -205,6 +215,14 @@ struct Threading {
         return false;
 #endif
     }
+    /** Whether SIMD optimization is used. */
+    bool simd_available() const {
+#ifdef _HAS_SIMD_OPT
+        return true;
+#else
+        return false;
+#endif
+    }
     /** Whether K symmetry extension is used. */
     bool ksymm_available() const {
 #ifdef _USE_KSYMM
@@ -253,6 +271,10 @@ struct Threading {
     string get_seq_type() const {
         if (seq_type == SeqTypes::Auto)
             return "Auto";
+        else if (seq_type == SeqTypes::Simd)
+            return "Simd";
+        else if (seq_type == SeqTypes::SimdTasked)
+            return "SimdTasked";
         else if (seq_type == SeqTypes::Tasked)
             return "Tasked";
         else if (seq_type == SeqTypes::SimpleTasked)
@@ -509,6 +531,7 @@ struct Threading {
            << " MKL = " << th.get_mkl_threading_type() << " "
            << th.get_mkl_version() << " SeqType = " << th.get_seq_type()
            << " MKLIntLen = " << sizeof(MKL_INT) << endl;
+        os << " SIMD = " << th.simd_available() << endl;
         os << " THREADING = " << th.n_levels << " layers : "
            << ((th.type & ThreadingTypes::Global) ? "Global | " : "")
            << ((th.type & ThreadingTypes::Operator) ? "Operator " : "")

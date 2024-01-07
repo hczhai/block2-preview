@@ -22,6 +22,10 @@
 
 #include "allocator.hpp"
 #include "matrix.hpp"
+#include "threading.hpp"
+#ifdef _HAS_SIMD_OPT
+#include "simd_matrix_functions.hpp"
+#endif
 #include <cassert>
 #include <cmath>
 #include <cstring>
@@ -303,7 +307,15 @@ inline void xgemm<double>(const char *transa, const char *transb,
                           const MKL_INT *lda, const double *b,
                           const MKL_INT *ldb, const double *beta, double *c,
                           const MKL_INT *ldc) noexcept {
-#ifdef _HAS_BLIS
+#if defined(_HAS_SIMD_OPT)
+    return threading_()->seq_type & SeqTypes::Simd
+               ? SimdMatrixFunctions<double>::avx_dgemm(
+                     !(*transa == 'n' || *transa == 'N'),
+                     !(*transb == 'n' || *transb == 'N'), *m, *n, *k, 512, 24,
+                     256, *alpha, a, *lda, b, *ldb, *beta, c, *ldc)
+               : FNAME(dgemm)(transa, transb, m, n, k, alpha, a, lda, b, ldb,
+                              beta, c, ldc);
+#elif defined(_HAS_BLIS)
     trans_t blis_transa, blis_transb;
     map_char_to_blis_trans(*transa, &blis_transa);
     map_char_to_blis_trans(*transb, &blis_transb);
@@ -1131,6 +1143,95 @@ struct GMatrixFunctions<
                                const GMatrix<FL> &c, FL scale,
                                uint64_t stride) {
         const FL cfactor = 1.0;
+#if defined(_HAS_SIMD_OPT)
+        if (threading_()->seq_type & SeqTypes::Simd) {
+            switch ((uint8_t)conja | (conjb << 1)) {
+            case 0:
+                if (a.m == 1 && a.n == 1)
+                    SimdMatrixFunctions<FL>::avx_matrix_nscale(
+                        b.m, b.n, 128, 16384, b.data, b.n, &c(0, stride), c.n,
+                        *a.data * scale, cfactor);
+                else if (b.m == 1 && b.n == 1)
+                    SimdMatrixFunctions<FL>::avx_matrix_nscale(
+                        a.m, a.n, 128, 16384, a.data, a.n, &c(0, stride), c.n,
+                        *b.data * scale, cfactor);
+                else {
+                    for (MKL_INT i = 0, inc = 1; i < a.m; i++)
+                        for (MKL_INT j = 0; j < a.n; j++) {
+                            const FL factor = scale * a(i, j);
+                            for (MKL_INT k = 0; k < b.m; k++)
+                                xaxpy<FL>(&b.n, &factor, &b(k, 0), &inc,
+                                          &c(i * b.m + k, j * b.n + stride),
+                                          &inc);
+                        }
+                }
+                break;
+            case 1:
+                if (a.m == 1 && a.n == 1)
+                    SimdMatrixFunctions<FL>::avx_matrix_nscale(
+                        b.m, b.n, 128, 16384, b.data, b.n, &c(0, stride), c.n,
+                        *a.data * scale, cfactor);
+                else if (b.m == 1 && b.n == 1)
+                    SimdMatrixFunctions<FL>::avx_matrix_tscale(
+                        a.n, a.m, 512, 256, a.data, a.n, &c(0, stride), c.n,
+                        *b.data * scale, cfactor);
+                else {
+                    for (MKL_INT i = 0, inc = 1; i < a.n; i++)
+                        for (MKL_INT j = 0; j < a.m; j++) {
+                            const FL factor = scale * a(j, i);
+                            for (MKL_INT k = 0; k < b.m; k++)
+                                xaxpy<FL>(&b.n, &factor, &b(k, 0), &inc,
+                                          &c(i * b.m + k, j * b.n + stride),
+                                          &inc);
+                        }
+                }
+                break;
+            case 2:
+                if (a.m == 1 && a.n == 1)
+                    SimdMatrixFunctions<FL>::avx_matrix_tscale(
+                        b.n, b.m, 512, 256, b.data, b.n, &c(0, stride), c.n,
+                        *a.data * scale, cfactor);
+                else if (b.m == 1 && b.n == 1)
+                    SimdMatrixFunctions<FL>::avx_matrix_nscale(
+                        a.m, a.n, 128, 16384, a.data, a.n, &c(0, stride), c.n,
+                        *b.data * scale, cfactor);
+                else {
+                    for (MKL_INT i = 0, incb = b.n, inc = 1; i < a.m; i++)
+                        for (MKL_INT j = 0; j < a.n; j++) {
+                            const FL factor = scale * a(i, j);
+                            for (MKL_INT k = 0; k < b.n; k++)
+                                xaxpy<FL>(&b.m, &factor, &b(0, k), &incb,
+                                          &c(i * b.n + k, j * b.m + stride),
+                                          &inc);
+                        }
+                }
+                break;
+            case 1 | 2:
+                if (a.m == 1 && a.n == 1)
+                    SimdMatrixFunctions<FL>::avx_matrix_tscale(
+                        b.n, b.m, 512, 256, b.data, b.n, &c(0, stride), c.n,
+                        *a.data * scale, cfactor);
+                else if (b.m == 1 && b.n == 1)
+                    SimdMatrixFunctions<FL>::avx_matrix_tscale(
+                        a.n, a.m, 512, 256, a.data, a.n, &c(0, stride), c.n,
+                        *b.data * scale, cfactor);
+                else {
+                    for (MKL_INT i = 0, incb = b.n, inc = 1; i < a.n; i++)
+                        for (MKL_INT j = 0; j < a.m; j++) {
+                            const FL factor = scale * a(j, i);
+                            for (MKL_INT k = 0; k < b.n; k++)
+                                xaxpy<FL>(&b.m, &factor, &b(0, k), &incb,
+                                          &c(i * b.n + k, j * b.m + stride),
+                                          &inc);
+                        }
+                }
+                break;
+            default:
+                assert(false);
+            }
+            return;
+        }
+#endif
         switch ((uint8_t)conja | (conjb << 1)) {
         case 0:
             if (a.m == 1 && a.n == 1) {

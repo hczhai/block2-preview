@@ -1702,6 +1702,8 @@ template <typename S = void> void bind_types(py::module &m) {
         .value("Auto", SeqTypes::Auto)
         .value("Tasked", SeqTypes::Tasked)
         .value("SimpleTasked", SeqTypes::SimpleTasked)
+        .value("Simd", SeqTypes::Simd)
+        .value("SimdTasked", SeqTypes::SimdTasked)
         .def(py::self & py::self)
         .def(py::self | py::self);
 

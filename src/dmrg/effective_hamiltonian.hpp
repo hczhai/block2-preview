@@ -568,7 +568,7 @@ struct EffectiveHamiltonian<S, FL, MPS<S, FL>> {
         SeqTypes mode = tf->opf->seq->mode;
         tf->opf->seq->mode = tf->opf->seq->mode & SeqTypes::Simple
                                  ? SeqTypes::Simple
-                                 : SeqTypes::None;
+                                 : seq_type_make_trivial(mode);
         tf->opf->seq->cumulative_nflop = 0;
         (*this)(GMatrix<FL>(ket->data, (MKL_INT)ket->total_memory, 1),
                 GMatrix<FL>(bra->data, (MKL_INT)bra->total_memory, 1));
@@ -610,7 +610,7 @@ struct EffectiveHamiltonian<S, FL, MPS<S, FL>> {
         SeqTypes mode = tf->opf->seq->mode;
         tf->opf->seq->mode = tf->opf->seq->mode & SeqTypes::Simple
                                  ? SeqTypes::Simple
-                                 : SeqTypes::None;
+                                 : seq_type_make_trivial(mode);
         tf->opf->seq->cumulative_nflop = 0;
         Timer t;
         t.get_time();
@@ -1577,7 +1577,7 @@ struct EffectiveHamiltonian<S, FL, MultiMPS<S, FL>> {
         SeqTypes mode = tf->opf->seq->mode;
         tf->opf->seq->mode = tf->opf->seq->mode & SeqTypes::Simple
                                  ? SeqTypes::Simple
-                                 : SeqTypes::None;
+                                 : seq_type_make_trivial(mode);
         tf->opf->seq->cumulative_nflop = 0;
         Timer t;
         t.get_time();

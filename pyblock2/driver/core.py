@@ -351,6 +351,7 @@ class DMRGDriver:
         mpi=None,
         stack_mem_ratio=0.4,
         fp_codec_cutoff=1e-16,
+        seq_type=None,
     ):
         if mpi is not None and mpi:
             self.mpi = True
@@ -375,7 +376,9 @@ class DMRGDriver:
             n_threads // n_mkl_threads,
             n_mkl_threads,
         )
-        bw.b.Global.threading.seq_type = bw.b.SeqTypes.Tasked
+        if seq_type is None:
+            seq_type = "Tasked"
+        bw.b.Global.threading.seq_type = getattr(bw.b.SeqTypes, seq_type)
         self.reorder_idx = None
         self.pg = "c1"
         self.orb_sym = None

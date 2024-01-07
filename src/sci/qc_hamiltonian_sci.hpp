@@ -273,7 +273,7 @@ public:
                             op_prims_normal[s + (sp << 1)].at(OpNames::R));
                         tmp->factor = v(s, sp, i, m, m, m);
                         opf->iadd(p.second, tmp);
-                        if (opf->seq->mode != SeqTypes::None)
+                        if (!seq_type_is_trivial(opf->seq->mode))
                             opf->seq->simple_perform();
                     }
                     tmp->deallocate();
@@ -298,7 +298,7 @@ public:
                             op_prims_normal[s + (sp << 1)].at(OpNames::RD));
                         tmp->factor = v(s, sp, i, m, m, m);
                         opf->iadd(p.second, tmp);
-                        if (opf->seq->mode != SeqTypes::None)
+                        if (!seq_type_is_trivial(opf->seq->mode))
                             opf->seq->simple_perform();
                     }
                     tmp->deallocate();
@@ -355,7 +355,7 @@ public:
                                 op_prims_normal[sp | (sp << 1)].at(OpNames::B));
                             tmp->factor = v(s & 1, sp, i, j, m, m);
                             opf->iadd(p.second, tmp);
-                            if (opf->seq->mode != SeqTypes::None)
+                            if (!seq_type_is_trivial(opf->seq->mode))
                                 opf->seq->simple_perform();
                         }
                         tmp->deallocate();

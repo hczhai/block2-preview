@@ -542,7 +542,7 @@ template <typename S, typename FL> struct CondensedMPO : MPO<S, FL> {
             make_shared<SparseMatrix<S, FL>>(d_alloc);
         spmat->allocate(info);
         SeqTypes mode_bak = opf->seq->mode;
-        opf->seq->mode = SeqTypes::None;
+        opf->seq->mode = seq_type_make_trivial(mode_bak);
         for (auto &op : xexpr->strings)
             opf->tensor_product(op->conj, opl.at(op->a), opr.at(op->b), spmat,
                                 op->factor);
