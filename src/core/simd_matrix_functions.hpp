@@ -600,9 +600,10 @@ struct SimdMatrixFunctions<
                           size_t ni, size_t nj, size_t nk, double alpha,
                           const double *a, size_t lda, const double *b,
                           size_t ldb, double beta, double *c, size_t ldc) {
-        vector<double> pa, pb;
-        pa.reserve(min(k, nk) * min(m, ni));
-        pb.reserve(min(k, nk) * n);
+        double *__restrict__ pa = (double *)aligned_alloc(
+            32, min(k, nk) * min(m, ni) * sizeof(double));
+        double *__restrict__ pb =
+            (double *)aligned_alloc(32, min(k, nk) * n * sizeof(double));
         for (size_t kk = 0; kk < k; kk += nk) {
             const size_t nnk = min(k - kk, nk);
             for (size_t ii = 0; ii < m; ii += ni) {
@@ -1178,6 +1179,8 @@ struct SimdMatrixFunctions<
                 }
             }
         }
+        free(pa);
+        free(pb);
     }
 };
 
