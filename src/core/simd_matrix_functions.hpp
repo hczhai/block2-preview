@@ -596,7 +596,7 @@ struct SimdMatrixFunctions<
                 b[nk - 1 + mi * nk] = a[nk - 1 + mi * lda];
         }
     }
-    static void avx_dgemm(uint8_t ta, uint8_t tb, size_t m, size_t n, size_t k,
+    static void avx_gemm(uint8_t ta, uint8_t tb, size_t m, size_t n, size_t k,
                           size_t ni, size_t nj, size_t nk, double alpha,
                           const double *a, size_t lda, const double *b,
                           size_t ldb, double beta, double *c, size_t ldc) {

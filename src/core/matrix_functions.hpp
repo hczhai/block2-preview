@@ -309,7 +309,7 @@ inline void xgemm<double>(const char *transa, const char *transb,
                           const MKL_INT *ldc) noexcept {
 #if defined(_HAS_SIMD_OPT)
     return threading_()->seq_type & SeqTypes::Simd
-               ? SimdMatrixFunctions<double>::avx_dgemm(
+               ? SimdMatrixFunctions<double>::avx_gemm(
                      !(*transa == 'n' || *transa == 'N'),
                      !(*transb == 'n' || *transb == 'N'), *m, *n, *k, 512, 24,
                      256, *alpha, a, *lda, b, *ldb, *beta, c, *ldc)
