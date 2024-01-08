@@ -597,9 +597,9 @@ struct SimdMatrixFunctions<
         }
     }
     static void avx_gemm(uint8_t ta, uint8_t tb, size_t m, size_t n, size_t k,
-                          size_t ni, size_t nj, size_t nk, double alpha,
-                          const double *a, size_t lda, const double *b,
-                          size_t ldb, double beta, double *c, size_t ldc) {
+                         size_t ni, size_t nj, size_t nk, double alpha,
+                         const double *a, size_t lda, const double *b,
+                         size_t ldb, double beta, double *c, size_t ldc) {
         double *__restrict__ pa = (double *)aligned_alloc(
             32, min(k, nk) * min(m, ni) * sizeof(double));
         double *__restrict__ pb =

@@ -565,13 +565,29 @@ struct AdvancedGEMM<FL,
                          const GMatrix<FL> &a, const GMatrix<FL> &c,
                          const GMatrix<FL> &bra, uint8_t conj_bra,
                          const GMatrix<FL> &ket, uint8_t conj_ket, FL scale) {
-        GMatrix<FL> work((FL *)0 + batch[0]->work, a.m,
-                         (conj_ket & 1) ? ket.m : ket.n);
-        AdvancedGEMM<FL>::multiply(batch[0], a, false, ket, conj_ket, work, 1.0,
-                                   0.0);
-        AdvancedGEMM<FL>::multiply(batch[1], bra, conj_bra, work, false, c,
-                                   scale, 1.0);
-        return work.size();
+        size_t ak = (size_t)a.m * ket.m * ket.n +
+                    (size_t)bra.m * bra.n * ((conj_ket & 1) ? ket.m : ket.n);
+        size_t ba = (size_t)a.n * bra.m * bra.n +
+                    (size_t)ket.m * ket.n * ((conj_bra & 1) ? bra.n : bra.m);
+        if (ak <= ba) {
+            GMatrix<FL> work((FL *)0 + batch[0]->work, a.m,
+                             (conj_ket & 1) ? ket.m : ket.n);
+            AdvancedGEMM<FL>::multiply(batch[0], a, false, ket, conj_ket, work,
+                                       1.0, 0.0);
+            AdvancedGEMM<FL>::multiply(batch[1], bra, conj_bra, work, false, c,
+                                       scale, 1.0);
+            batch[0]->acidxs.push_back(0);
+            return work.size();
+        } else {
+            GMatrix<FL> work((FL *)0 + batch[0]->work,
+                             (conj_bra & 1) ? bra.n : bra.m, a.n);
+            AdvancedGEMM<FL>::multiply(batch[0], bra, conj_bra, a, false, work,
+                                       1.0, 0.0);
+            AdvancedGEMM<FL>::multiply(batch[1], work, false, ket, conj_ket, c,
+                                       scale, 1.0);
+            batch[0]->acidxs.push_back(3);
+            return work.size();
+        }
     }
     static void post_three_rotate(const shared_ptr<BatchGEMM<FL>> &batch,
                                   uint8_t x) {}
