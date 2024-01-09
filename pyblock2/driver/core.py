@@ -378,7 +378,13 @@ class DMRGDriver:
         )
         if seq_type is None:
             seq_type = "Tasked"
-        bw.b.Global.threading.seq_type = getattr(bw.b.SeqTypes, seq_type)
+        if '|' in seq_type:
+            from functools import reduce
+            bw.b.Global.threading.seq_type = reduce(lambda x, y: x | y,
+                [getattr(bw.b.SeqTypes, x) for x in seq_type.split('|')])
+        else:
+            bw.b.Global.threading.seq_type = getattr(bw.b.SeqTypes, seq_type)
+
         self.reorder_idx = None
         self.pg = "c1"
         self.orb_sym = None
@@ -2205,7 +2211,6 @@ class DMRGDriver:
                 gg2e[0::2, 0::2, 0::2, 0::2] = gg2e[0::2, 0::2, 1::2, 1::2] = g2e
                 gg2e[1::2, 1::2, 0::2, 0::2] = gg2e[1::2, 1::2, 1::2, 1::2] = g2e
                 g2e = gg2e
-
         if symmetrize and self.orb_sym is not None:
             x_orb_sym = bw.VectorPG(self.orb_sym)
             if self.reorder_idx is not None:

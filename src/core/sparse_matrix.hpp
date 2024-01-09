@@ -52,8 +52,9 @@ struct SparseMatrixInfo<
     // Composite quantum number for row and column quanta
     S *quanta;
     ubond_t *n_states_bra, *n_states_ket;
-    uint32_t *n_states_total;
+    uint32_t *block_shifts;
     S delta_quantum;
+    mutable uint8_t block_shifts_fl_size;
     bool is_fermion;
     bool is_wavefunction;
     // Number of non-zero blocks
@@ -141,8 +142,9 @@ struct SparseMatrixInfo<
                 if (n[i] == -1)
                     n[i] = n[i + 1];
             nc = (int)vic.size();
-            uint32_t *ptr = ialloc->allocate(n[4] * (sizeof(S) >> 2) + n[4]);
-            uint32_t *cptr = ialloc->allocate(nc * 7);
+            uint32_t *ptr =
+                ialloc->allocate(n[4] * (sizeof(S) >> 2) + n[4] + nc * 7);
+            uint32_t *cptr = ptr + (n[4] * (sizeof(S) >> 2) + n[4]);
             quanta = (S *)ptr;
             idx = ptr + n[4] * (sizeof(S) >> 2);
             stride = (uint64_t *)cptr;
@@ -271,8 +273,9 @@ struct SparseMatrixInfo<
                 if (n[i] == -1)
                     n[i] = n[i + 1];
             nc = (int)viv.size();
-            uint32_t *ptr = ialloc->allocate(n[4] * (sizeof(S) >> 2) + n[4]);
-            uint32_t *cptr = ialloc->allocate(nc * 7);
+            uint32_t *ptr =
+                ialloc->allocate(n[4] * (sizeof(S) >> 2) + n[4] + nc * 7);
+            uint32_t *cptr = ptr + (n[4] * (sizeof(S) >> 2) + n[4]);
             quanta = (S *)ptr;
             idx = ptr + n[4] * (sizeof(S) >> 2);
             stride = (uint64_t *)cptr;
@@ -401,8 +404,9 @@ struct SparseMatrixInfo<
                 if (n[i] == -1)
                     n[i] = n[i + 1];
             nc = (int)vstride.size();
-            uint32_t *ptr = ialloc->allocate(n[4] * (sizeof(S) >> 2) + n[4]);
-            uint32_t *cptr = ialloc->allocate(nc * 7);
+            uint32_t *ptr =
+                ialloc->allocate(n[4] * (sizeof(S) >> 2) + n[4] + nc * 7);
+            uint32_t *cptr = ptr + (n[4] * (sizeof(S) >> 2) + n[4]);
             quanta = (S *)ptr;
             idx = ptr + n[4] * (sizeof(S) >> 2);
             stride = (uint64_t *)cptr;
@@ -526,10 +530,11 @@ struct SparseMatrixInfo<
         }
         ifs.read((char *)&is_fermion, sizeof(is_fermion));
         ifs.read((char *)&is_wavefunction, sizeof(is_wavefunction));
+        ifs.read((char *)&block_shifts_fl_size, sizeof(block_shifts_fl_size));
         quanta = (S *)ptr;
         n_states_bra = (ubond_t *)(ptr + n * (sizeof(S) >> 2));
         n_states_ket = (ubond_t *)(ptr + n * (sizeof(S) >> 2)) + n;
-        n_states_total = ptr + n * (sizeof(S) >> 2) + _DBL_MEM_SIZE(n);
+        block_shifts = ptr + n * (sizeof(S) >> 2) + _DBL_MEM_SIZE(n);
         cinfo = nullptr;
     }
     void save_data(const string &filename) const {
@@ -562,6 +567,7 @@ struct SparseMatrixInfo<
                           (n * (sizeof(S) >> 2) + n + _DBL_MEM_SIZE(n)));
         ofs.write((char *)&is_fermion, sizeof(is_fermion));
         ofs.write((char *)&is_wavefunction, sizeof(is_wavefunction));
+        ofs.write((char *)&block_shifts_fl_size, sizeof(block_shifts_fl_size));
     }
     // L (wfn) x R (wfn)^T = rot
     void initialize_trans_contract(const shared_ptr<SparseMatrixInfo> &linfo,
@@ -601,8 +607,22 @@ struct SparseMatrixInfo<
             for (int i = 0; i < n; i++)
                 n_states_bra[i] = mqs[qs[i]].first,
                 n_states_ket[i] = mqs[qs[i]].second;
-            sort_states();
+            sort_blocks();
         }
+    }
+    template <typename FL> void initialize_block_shifts() const {
+        const uint32_t xalign =
+            (threading->seq_type & SeqTypes::Aligned)
+                ? (threading->seq_type & SeqTypes::Aligned) / sizeof(FL)
+                : 1;
+        block_shifts[0] = 0;
+        for (int i = 0; i < n - 1; i++) {
+            uint32_t x = (uint32_t)n_states_bra[i] * n_states_ket[i];
+            block_shifts[i + 1] =
+                block_shifts[i] + (x + xalign - 1) / xalign * xalign;
+            assert(block_shifts[i + 1] >= block_shifts[i]);
+        }
+        block_shifts_fl_size = sizeof(FL);
     }
     // Generate minimal SparseMatrixInfo from contracting two SparseMatrix
     void initialize_contract(const shared_ptr<SparseMatrixInfo> &linfo,
@@ -647,11 +667,6 @@ struct SparseMatrixInfo<
                     n_states_ket[i] =
                         rinfo->n_states_ket[rinfo->find_state(ket)];
                 }
-            n_states_total[0] = 0;
-            for (int i = 0; i < n - 1; i++)
-                n_states_total[i + 1] =
-                    n_states_total[i] +
-                    (uint32_t)n_states_bra[i] * n_states_ket[i];
         }
     }
     // Generate SparseMatrixInfo for density matrix
@@ -701,11 +716,6 @@ struct SparseMatrixInfo<
                             wfn_info->n_states_ket[i];
                     }
                 }
-            n_states_total[0] = 0;
-            for (int i = 0; i < n - 1; i++)
-                n_states_total[i + 1] =
-                    n_states_total[i] +
-                    (uint32_t)n_states_bra[i] * n_states_ket[i];
         }
     }
     // Generate SparseMatrixInfo from bra and ket StateInfo and
@@ -739,11 +749,6 @@ struct SparseMatrixInfo<
                 n_states_bra[i] =
                     bra.n_states[bra.find_state(quanta[i].get_bra(dq))];
             }
-            n_states_total[0] = 0;
-            for (int i = 0; i < n - 1; i++)
-                n_states_total[i + 1] =
-                    n_states_total[i] +
-                    (uint32_t)n_states_bra[i] * n_states_ket[i];
         }
     }
     // Extract row or column StateInfo from SparseMatrixInfo
@@ -778,7 +783,7 @@ struct SparseMatrixInfo<
         else
             return (int)(p - quanta);
     }
-    void sort_states() {
+    void sort_blocks() {
         vector<int> idx(n);
         vector<S> q(quanta, quanta + n);
         vector<ubond_t> nqb(n_states_bra, n_states_bra + n);
@@ -790,25 +795,27 @@ struct SparseMatrixInfo<
         for (int i = 0; i < n; i++)
             quanta[i] = q[idx[i]], n_states_bra[i] = nqb[idx[i]],
             n_states_ket[i] = nqk[idx[i]];
-        n_states_total[0] = 0;
-        for (int i = 0; i < n - 1; i++) {
-            n_states_total[i + 1] =
-                n_states_total[i] + (uint32_t)n_states_bra[i] * n_states_ket[i];
-            assert(n_states_total[i + 1] >= n_states_total[i]);
-        }
+        block_shifts_fl_size = 0;
     }
-    uint32_t get_total_memory() const {
+    template <typename FL> uint32_t get_total_memory() const {
         if (n == 0)
             return 0;
         else {
-            uint32_t tmem = n_states_total[n - 1] +
-                            (uint32_t)n_states_bra[n - 1] * n_states_ket[n - 1];
-            assert(tmem >= n_states_total[n - 1]);
+            if (block_shifts_fl_size != sizeof(FL))
+                initialize_block_shifts<FL>();
+            const uint32_t xalign =
+                (threading->seq_type & SeqTypes::Aligned)
+                    ? (threading->seq_type & SeqTypes::Aligned) / sizeof(FL)
+                    : 1;
+            uint32_t x = (uint32_t)n_states_bra[n - 1] * n_states_ket[n - 1];
+            uint32_t tmem =
+                block_shifts[n - 1] + (x + xalign - 1) / xalign * xalign;
+            assert(tmem >= block_shifts[n - 1]);
             return tmem;
         }
     }
-    void allocate(int length, uint32_t *ptr = 0) {
-        if (ptr == 0) {
+    void allocate(int length, uint32_t *ptr = nullptr) {
+        if (ptr == nullptr) {
             if (alloc == nullptr)
                 alloc = ialloc;
             ptr = alloc->allocate(length * (sizeof(S) >> 2) + length +
@@ -817,8 +824,8 @@ struct SparseMatrixInfo<
         quanta = (S *)ptr;
         n_states_bra = (ubond_t *)(ptr + length * (sizeof(S) >> 2));
         n_states_ket = (ubond_t *)(ptr + length * (sizeof(S) >> 2)) + length;
-        n_states_total =
-            ptr + length * (sizeof(S) >> 2) + _DBL_MEM_SIZE(length);
+        block_shifts = ptr + length * (sizeof(S) >> 2) + _DBL_MEM_SIZE(length);
+        block_shifts_fl_size = 0;
         n = length;
     }
     void deallocate() {
@@ -829,7 +836,8 @@ struct SparseMatrixInfo<
         quanta = nullptr;
         n_states_bra = nullptr;
         n_states_ket = nullptr;
-        n_states_total = nullptr;
+        block_shifts = nullptr;
+        block_shifts_fl_size = 0;
         n = -1;
     }
     void reallocate(int length) {
@@ -848,13 +856,13 @@ struct SparseMatrixInfo<
         }
         n_states_bra = (ubond_t *)(ptr + length * (sizeof(S) >> 2));
         n_states_ket = (ubond_t *)(ptr + length * (sizeof(S) >> 2)) + length;
-        n_states_total =
-            ptr + length * (sizeof(S) >> 2) + _DBL_MEM_SIZE(length);
+        block_shifts = ptr + length * (sizeof(S) >> 2) + _DBL_MEM_SIZE(length);
+        block_shifts_fl_size = 0;
         n = length;
     }
     friend ostream &operator<<(ostream &os, const SparseMatrixInfo<S> &c) {
         os << "DQ=" << c.delta_quantum << " N=" << c.n
-           << " SIZE=" << c.get_total_memory() << endl;
+           << " SIZE=" << c.template get_total_memory<double>() << endl;
         for (int i = 0; i < c.n; i++)
             os << "BRA " << c.quanta[i].get_bra(c.delta_quantum) << " KET "
                << c.quanta[i].get_ket() << " [ " << (int)c.n_states_bra[i]
@@ -903,6 +911,12 @@ template <typename S, typename FL> struct SparseMatrix {
         } else {
             data = (FL *)alloc->allocate(total_memory * cpx_sz);
             ifs.read((char *)data, sizeof(FL) * total_memory);
+        }
+        if (threading->seq_type & SeqTypes::Aligned) {
+            if (((uintptr_t)(const void *)data) %
+                (threading->seq_type & SeqTypes::Aligned))
+                throw runtime_error(
+                    "SparseMatrix::load_data: memory not aligned.");
         }
     }
     void load_data(const string &filename, bool load_info = false,
@@ -970,8 +984,8 @@ template <typename S, typename FL> struct SparseMatrix {
                                      bool ref = false) {
         for (int i = 0, k; i < other->info->n; i++)
             if ((k = info->find_state(other->info->quanta[i])) != -1)
-                memcpy(data + info->n_states_total[k],
-                       other->data + other->info->n_states_total[i],
+                memcpy(data + info->block_shifts[k],
+                       other->data + other->info->block_shifts[i],
                        sizeof(FL) * ((size_t)info->n_states_bra[k] *
                                      info->n_states_ket[k]));
     }
@@ -980,18 +994,24 @@ template <typename S, typename FL> struct SparseMatrix {
         allocate(mat->info);
     }
     virtual void allocate(const shared_ptr<SparseMatrixInfo<S>> &info,
-                          FL *ptr = 0) {
+                          FL *ptr = nullptr) {
         this->info = info;
-        total_memory = info->get_total_memory();
+        total_memory = info->template get_total_memory<FL>();
         if (total_memory == 0)
             return;
-        if (ptr == 0) {
+        if (ptr == nullptr) {
             if (alloc == nullptr)
                 alloc = dalloc_<FP>();
             data = (FL *)alloc->allocate(total_memory * cpx_sz);
             memset(data, 0, sizeof(FL) * total_memory);
         } else
             data = ptr;
+        if (threading->seq_type & SeqTypes::Aligned) {
+            if (((uintptr_t)(const void *)data) %
+                (threading->seq_type & SeqTypes::Aligned))
+                throw runtime_error(
+                    "SparseMatrix::allocate: memory not aligned.");
+        }
     }
     virtual void deallocate() {
         if (alloc == nullptr)
@@ -1027,7 +1047,7 @@ template <typename S, typename FL> struct SparseMatrix {
     GMatrix<FL> operator[](S q) const { return (*this)[info->find_state(q)]; }
     GMatrix<FL> operator[](int idx) const {
         assert(idx != -1);
-        return GMatrix<FL>(data + info->n_states_total[idx],
+        return GMatrix<FL>(data + info->block_shifts[idx],
                            (int)info->n_states_bra[idx],
                            (int)info->n_states_ket[idx]);
     }
@@ -1101,7 +1121,7 @@ template <typename S, typename FL> struct SparseMatrix {
             winfo->n_states_bra[i] = r[i]->shape[0];
             winfo->n_states_ket[i] = r[i]->shape[1];
         }
-        winfo->sort_states();
+        winfo->sort_blocks();
         linfo->is_fermion = false;
         linfo->is_wavefunction = false;
         linfo->delta_quantum = (info->delta_quantum - info->delta_quantum)[0];
@@ -1116,7 +1136,7 @@ template <typename S, typename FL> struct SparseMatrix {
                 GMatrixFunctions<FP>::iscale(s[i]->ref(), -1);
             }
         }
-        linfo->sort_states();
+        linfo->sort_blocks();
         left = make_shared<SparseMatrix>(d_alloc);
         right = make_shared<SparseMatrix>(d_alloc);
         left->allocate(linfo);
@@ -1158,7 +1178,7 @@ template <typename S, typename FL> struct SparseMatrix {
             winfo->n_states_bra[i] = l[i]->shape[0];
             winfo->n_states_ket[i] = l[i]->shape[1];
         }
-        winfo->sort_states();
+        winfo->sort_blocks();
         rinfo->is_fermion = false;
         rinfo->is_wavefunction = false;
         rinfo->delta_quantum = (info->delta_quantum - info->delta_quantum)[0];
@@ -1173,7 +1193,7 @@ template <typename S, typename FL> struct SparseMatrix {
                 GMatrixFunctions<FP>::iscale(s[i]->ref(), -1);
             }
         }
-        rinfo->sort_states();
+        rinfo->sort_blocks();
         left = make_shared<SparseMatrix>(d_alloc);
         right = make_shared<SparseMatrix>(d_alloc);
         left->allocate(winfo);
@@ -1252,7 +1272,7 @@ template <typename S, typename FL> struct SparseMatrix {
             size_t ir = lower_bound(rqs.begin(), rqs.end(), q) - rqs.begin();
             MKL_INT n_states =
                 (MKL_INT)info->n_states_bra[i] * info->n_states_ket[i];
-            memcpy(dt + (tmp[ir] + it[ir]), data + info->n_states_total[i],
+            memcpy(dt + (tmp[ir] + it[ir]), data + info->block_shifts[i],
                    n_states * sizeof(FL));
             sz[ir] = info->n_states_ket[i];
             it[ir] += n_states;
@@ -1348,7 +1368,7 @@ template <typename S, typename FL> struct SparseMatrix {
             MKL_INT inr = info->n_states_ket[i];
             for (MKL_INT k = 0; k < nxl; k++)
                 memcpy(dt + (tmp[il] + it[il] + k * nxr),
-                       data + (info->n_states_total[i] + k * inr),
+                       data + (info->block_shifts[i] + k * inr),
                        inr * sizeof(FL));
             sz[il] = nxl;
             it[il] += inr;
@@ -1435,7 +1455,7 @@ template <typename S, typename FL> struct SparseMatrix {
             int ir = rmat->info->find_state(info->quanta[i].get_ket());
             MKL_INT n_states =
                 (MKL_INT)info->n_states_bra[i] * info->n_states_ket[i];
-            memcpy(dt + (tmp[ir] + it[ir]), data + info->n_states_total[i],
+            memcpy(dt + (tmp[ir] + it[ir]), data + info->block_shifts[i],
                    n_states * sizeof(FL));
             it[ir] += n_states;
         }
@@ -1454,7 +1474,7 @@ template <typename S, typename FL> struct SparseMatrix {
             int ir = rmat->info->find_state(info->quanta[i].get_ket());
             MKL_INT n_states =
                 (MKL_INT)info->n_states_bra[i] * info->n_states_ket[i];
-            memcpy(data + info->n_states_total[i], dt + (tmp[ir] + it[ir]),
+            memcpy(data + info->block_shifts[i], dt + (tmp[ir] + it[ir]),
                    n_states * sizeof(FL));
             it[ir] += n_states;
         }
@@ -1482,7 +1502,7 @@ template <typename S, typename FL> struct SparseMatrix {
             MKL_INT inr = info->n_states_ket[i];
             for (MKL_INT k = 0; k < nxl; k++)
                 memcpy(dt + (tmp[il] + it[il] + k * nxr),
-                       data + info->n_states_total[i] + k * inr,
+                       data + info->block_shifts[i] + k * inr,
                        inr * sizeof(FL));
             it[il] += inr * nxl;
         }
@@ -1504,7 +1524,7 @@ template <typename S, typename FL> struct SparseMatrix {
                     nxr = (tmp[il + 1] - tmp[il]) / nxl;
             MKL_INT inr = info->n_states_ket[i];
             for (MKL_INT k = 0; k < nxl; k++)
-                memcpy(data + info->n_states_total[i] + k * inr,
+                memcpy(data + info->block_shifts[i] + k * inr,
                        dt + (tmp[il] + it[il] + k * nxr), inr * sizeof(FL));
             it[il] += inr * nxl;
         }
@@ -1521,6 +1541,10 @@ template <typename S, typename FL> struct SparseMatrix {
             make_shared<VectorAllocator<uint32_t>>();
         shared_ptr<VectorAllocator<FP>> d_alloc =
             make_shared<VectorAllocator<FP>>();
+        const uint32_t xalign =
+            (threading->seq_type & SeqTypes::Aligned)
+                ? (threading->seq_type & SeqTypes::Aligned) / sizeof(FL)
+                : 1;
         shared_ptr<SparseMatrixInfo<S>> xinfo =
             make_shared<SparseMatrixInfo<S>>(i_alloc);
         shared_ptr<StateInfo<S>> rsi = info->extract_state_info(true);
@@ -1539,7 +1563,7 @@ template <typename S, typename FL> struct SparseMatrix {
             int ib = old_fused.find_state(bra);
             int ik = r.find_state(ket);
             int bbed = old_fused_cinfo->acc_n_states[ib + 1];
-            MKL_INT p = info->n_states_total[i], xp = xinfo->n_states_total[i];
+            MKL_INT p = info->block_shifts[i], xp = xinfo->block_shifts[i];
             for (int bb = old_fused_cinfo->acc_n_states[ib]; bb < bbed; bb++) {
                 uint32_t ibba = old_fused_cinfo->ij_indices[bb].first,
                          ibbb = old_fused_cinfo->ij_indices[bb].second;
@@ -1557,14 +1581,15 @@ template <typename S, typename FL> struct SparseMatrix {
                 }
                 p += l.n_states[ibba] * lp;
             }
+            p = (p + xalign - 1) / xalign * xalign;
+            xp = (xp + xalign - 1) / xalign * xalign;
             // here possible error because dot == 2, dynamic canonicalize
             // assumes there is a two-site tensor
             // then the inferred bond_dims can be wrong
-            assert(p == (i != info->n - 1 ? info->n_states_total[i + 1]
+            assert(p == (i != info->n - 1 ? info->block_shifts[i + 1]
                                           : total_memory));
-            assert(xp == (ix != xinfo->n - 1
-                              ? xmat->info->n_states_total[ix + 1]
-                              : xmat->total_memory));
+            assert(xp == (ix != xinfo->n - 1 ? xmat->info->block_shifts[ix + 1]
+                                             : xmat->total_memory));
         }
         return xmat;
     }
@@ -1598,7 +1623,7 @@ template <typename S, typename FL> struct SparseMatrix {
             int ik = old_fused.find_state(ket);
             int ikn = new_fused.find_state(ket);
             int kked = old_fused_cinfo->acc_n_states[ik + 1];
-            MKL_INT p = info->n_states_total[i], xp = xinfo->n_states_total[ix];
+            MKL_INT p = info->block_shifts[i], xp = xinfo->block_shifts[ix];
             for (int kk = old_fused_cinfo->acc_n_states[ik]; kk < kked; kk++) {
                 uint32_t ikka = old_fused_cinfo->ij_indices[kk].first,
                          ikkb = old_fused_cinfo->ij_indices[kk].second;
@@ -1631,6 +1656,10 @@ template <typename S, typename FL> struct SparseMatrix {
         const StateInfo<S> &old_fused,
         const shared_ptr<typename StateInfo<S>::ConnectionInfo>
             &old_fused_cinfo) const {
+        const uint32_t xalign =
+            (threading->seq_type & SeqTypes::Aligned)
+                ? (threading->seq_type & SeqTypes::Aligned) / sizeof(FL)
+                : 1;
         for (int i = 0; i < info->n; i++) {
             S bra = info->quanta[i].get_bra(info->delta_quantum);
             S ket = info->is_wavefunction ? -info->quanta[i].get_ket()
@@ -1638,7 +1667,7 @@ template <typename S, typename FL> struct SparseMatrix {
             int ib = old_fused.find_state(bra);
             int ik = r.find_state(ket);
             int bbed = old_fused_cinfo->acc_n_states[ib + 1];
-            MKL_INT p = info->n_states_total[i];
+            MKL_INT p = info->block_shifts[i];
             for (int bb = old_fused_cinfo->acc_n_states[ib]; bb < bbed; bb++) {
                 uint32_t ibba = old_fused_cinfo->ij_indices[bb].first,
                          ibbb = old_fused_cinfo->ij_indices[bb].second;
@@ -1659,7 +1688,8 @@ template <typename S, typename FL> struct SparseMatrix {
                 }
                 p += l.n_states[ibba] * lp;
             }
-            assert(p == (i != info->n - 1 ? info->n_states_total[i + 1]
+            p = (p + xalign - 1) / xalign * xalign;
+            assert(p == (i != info->n - 1 ? info->block_shifts[i + 1]
                                           : total_memory));
         }
     }
@@ -1677,7 +1707,7 @@ template <typename S, typename FL> struct SparseMatrix {
             int ib = l.find_state(bra);
             int ik = old_fused.find_state(ket);
             int kked = old_fused_cinfo->acc_n_states[ik + 1];
-            MKL_INT p = info->n_states_total[i];
+            MKL_INT p = info->block_shifts[i];
             for (int kk = old_fused_cinfo->acc_n_states[ik]; kk < kked; kk++) {
                 uint32_t ikka = old_fused_cinfo->ij_indices[kk].first,
                          ikkb = old_fused_cinfo->ij_indices[kk].second;
@@ -1765,6 +1795,10 @@ template <typename S, typename FL> struct SparseMatrix {
                            &new_fused_cinfo,
                        const shared_ptr<CG<S>> &cg) {
         assert(mat->info->is_wavefunction);
+        const uint32_t xalign =
+            (threading->seq_type & SeqTypes::Aligned)
+                ? (threading->seq_type & SeqTypes::Aligned) / sizeof(FL)
+                : 1;
         factor = mat->factor;
         // for SU2 with target 2S != 0, for each l m r there can be multiple mr
         // mp is the three-index wavefunction
@@ -1779,7 +1813,7 @@ template <typename S, typename FL> struct SparseMatrix {
             int ib = l.find_state(bra);
             int ik = old_fused.find_state(ket);
             int kked = old_fused_cinfo->acc_n_states[ik + 1];
-            MKL_INT p = mat->info->n_states_total[i];
+            MKL_INT p = mat->info->block_shifts[i];
             for (int kk = old_fused_cinfo->acc_n_states[ik]; kk < kked; kk++) {
                 uint32_t ikka = old_fused_cinfo->ij_indices[kk].first,
                          ikkb = old_fused_cinfo->ij_indices[kk].second;
@@ -1794,7 +1828,7 @@ template <typename S, typename FL> struct SparseMatrix {
             int ib = new_fused.find_state(bra);
             int ik = r.find_state(ket);
             int bbed = new_fused_cinfo->acc_n_states[ib + 1];
-            FL *ptr = data + info->n_states_total[i];
+            FL *ptr = data + info->block_shifts[i];
             for (int bb = new_fused_cinfo->acc_n_states[ib]; bb < bbed; bb++) {
                 uint32_t ibba = new_fused_cinfo->ij_indices[bb].first,
                          ibbb = new_fused_cinfo->ij_indices[bb].second;
@@ -1821,8 +1855,11 @@ template <typename S, typename FL> struct SparseMatrix {
                     }
                 ptr += (size_t)l.n_states[ibba] * lp;
             }
-            assert(ptr - data == (i != info->n - 1 ? info->n_states_total[i + 1]
-                                                   : total_memory));
+            size_t llp = (ptr - (data + info->block_shifts[i]) + xalign - 1) /
+                         xalign * xalign;
+            assert(
+                info->block_shifts[i] + llp ==
+                (i != info->n - 1 ? info->block_shifts[i + 1] : total_memory));
         }
     }
     // Change from [(fused l and m) x r] to [l x (fused m and r)]
@@ -1837,6 +1874,10 @@ template <typename S, typename FL> struct SparseMatrix {
                             &new_fused_cinfo,
                         const shared_ptr<CG<S>> &cg) {
         assert(mat->info->is_wavefunction);
+        const uint32_t xalign =
+            (threading->seq_type & SeqTypes::Aligned)
+                ? (threading->seq_type & SeqTypes::Aligned) / sizeof(FL)
+                : 1;
         factor = mat->factor;
         unordered_map<pair<uint32_t, uint32_t>,
                       map<uint16_t, vector<tuple<MKL_INT, MKL_INT, int>>>,
@@ -1849,17 +1890,18 @@ template <typename S, typename FL> struct SparseMatrix {
             int ib = old_fused.find_state(bra);
             int ik = r.find_state(ket);
             int bbed = old_fused_cinfo->acc_n_states[ib + 1];
-            MKL_INT p = mat->info->n_states_total[i];
+            MKL_INT p = mat->info->block_shifts[i];
             for (int bb = old_fused_cinfo->acc_n_states[ib]; bb < bbed; bb++) {
                 uint32_t ibba = old_fused_cinfo->ij_indices[bb].first,
                          ibbb = old_fused_cinfo->ij_indices[bb].second;
                 MKL_INT lp = (MKL_INT)m.n_states[ibbb] * r.n_states[ik];
-                mp[make_pair(ibbb, ik)][ibba].push_back(make_tuple(p, lp, ib));
+                mp[make_pair(ibbb, ik)][ibba].push_back(
+                    make_tuple(p, lp, ib));
                 p += l.n_states[ibba] * lp;
             }
-            assert(p == (i != mat->info->n - 1
-                             ? mat->info->n_states_total[i + 1]
-                             : mat->total_memory));
+            p = (p + xalign - 1) / xalign * xalign;
+            assert(p == (i != mat->info->n - 1 ? mat->info->block_shifts[i + 1]
+                                               : mat->total_memory));
         }
         for (int i = 0; i < info->n; i++) {
             S bra = info->quanta[i].get_bra(info->delta_quantum);
@@ -1867,7 +1909,7 @@ template <typename S, typename FL> struct SparseMatrix {
             int ib = l.find_state(bra);
             int ik = new_fused.find_state(ket);
             int kked = new_fused_cinfo->acc_n_states[ik + 1];
-            FL *ptr = data + info->n_states_total[i];
+            FL *ptr = data + info->block_shifts[i];
             MKL_INT lp = new_fused.n_states[ik];
             for (int kk = new_fused_cinfo->acc_n_states[ik]; kk < kked; kk++) {
                 uint32_t ikka = new_fused_cinfo->ij_indices[kk].first,
@@ -1938,6 +1980,12 @@ template <typename S, typename FL> struct SparseMatrixGroup {
         if (alloc == nullptr)
             alloc = dalloc_<FP>();
         data = (FL *)alloc->allocate(total_memory * cpx_sz);
+        if (threading->seq_type & SeqTypes::Aligned) {
+            if (((uintptr_t)(const void *)data) %
+                (threading->seq_type & SeqTypes::Aligned))
+                throw runtime_error(
+                    "SparseMatrixGroup::load_data: memory not aligned.");
+        }
         ifs.read((char *)data, sizeof(FL) * total_memory);
         if (ifs.fail() || ifs.bad())
             throw runtime_error("SparseMatrixGroup::load_data on '" + filename +
@@ -1967,27 +2015,35 @@ template <typename S, typename FL> struct SparseMatrixGroup {
         allocate(mat->infos);
     }
     void allocate(const vector<shared_ptr<SparseMatrixInfo<S>>> &infos,
-                  FL *ptr = 0) {
+                  FL *ptr = nullptr) {
         this->infos = infos;
         n = (int)infos.size();
         offsets.resize(n);
         if (n != 0) {
             offsets[0] = 0;
             for (size_t i = 0; i < n - 1; i++)
-                offsets[i + 1] = offsets[i] + infos[i]->get_total_memory();
-            total_memory = offsets[n - 1] + infos[n - 1]->get_total_memory();
+                offsets[i + 1] =
+                    offsets[i] + infos[i]->template get_total_memory<FL>();
+            total_memory =
+                offsets[n - 1] + infos[n - 1]->template get_total_memory<FL>();
         } else {
             total_memory = 0;
             data = nullptr;
             return;
         }
-        if (ptr == 0) {
+        if (ptr == nullptr) {
             if (alloc == nullptr)
                 alloc = dalloc_<FP>();
             data = (FL *)alloc->allocate(total_memory * cpx_sz);
             memset(data, 0, sizeof(FL) * total_memory);
         } else
             data = ptr;
+        if (threading->seq_type & SeqTypes::Aligned) {
+            if (((uintptr_t)(const void *)data) %
+                (threading->seq_type & SeqTypes::Aligned))
+                throw runtime_error(
+                    "SparseMatrixGroup::allocate: memory not aligned.");
+        }
     }
     void deallocate() {
         if (alloc == nullptr)
@@ -2075,7 +2131,7 @@ template <typename S, typename FL> struct SparseMatrixGroup {
         shared_ptr<SparseMatrix<S, FL>> r = make_shared<SparseMatrix<S, FL>>();
         r->data = data + offsets[idx];
         r->info = infos[idx];
-        r->total_memory = infos[idx]->get_total_memory();
+        r->total_memory = infos[idx]->template get_total_memory<FL>();
         return r;
     }
     // l will have the same number of non-zero blocks as this matrix group
@@ -2130,8 +2186,7 @@ template <typename S, typename FL> struct SparseMatrixGroup {
                 if (abs(xscales[ii]) > 1E-12)
                     GMatrixFunctions<FL>::iadd(
                         GMatrix<FL>(dt + (tmp[ir] + it[ir]), n_states, 1),
-                        GMatrix<FL>(data + xoffsets[ii] +
-                                        info->n_states_total[i],
+                        GMatrix<FL>(data + xoffsets[ii] + info->block_shifts[i],
                                     n_states, 1),
                         xscales[ii]);
                 sz[ir] = info->n_states_ket[i];
@@ -2245,7 +2300,7 @@ template <typename S, typename FL> struct SparseMatrixGroup {
                             GMatrix<FL>(dt + (tmp[il] + it[il] + k * nxr), inr,
                                         1),
                             GMatrix<FL>(data + xoffsets[ii] +
-                                            (info->n_states_total[i] + k * inr),
+                                            (info->block_shifts[i] + k * inr),
                                         inr, 1),
                             xscales[ii]);
                 }

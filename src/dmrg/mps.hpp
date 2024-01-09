@@ -1600,7 +1600,7 @@ template <typename S, typename FL> struct MPS {
             mat_info->initialize(t, *info->left_dims[i + 1], info->vacuum,
                                  false);
             left_total.push_back(left_total.back() +
-                                 mat_info->get_total_memory());
+                                 mat_info->template get_total_memory<double>());
             mat_info->deallocate();
         }
         for (int i = n_sites - 1; i >= 0; i--) {
@@ -1609,7 +1609,7 @@ template <typename S, typename FL> struct MPS {
                 *info->right_dims_fci[i]);
             mat_info->initialize(*info->right_dims[i], t, info->vacuum, false);
             right_total.push_back(right_total.back() +
-                                  mat_info->get_total_memory());
+                                  mat_info->template get_total_memory<double>());
             mat_info->deallocate();
         }
         if (dot == 2) {
@@ -1621,10 +1621,10 @@ template <typename S, typename FL> struct MPS {
                     *info->basis[i + 1], *info->right_dims[i + 2],
                     *info->right_dims_fci[i + 1]);
                 mat_info->initialize(tl, tr, info->target, false, true);
-                peak = max(peak, (size_t)mat_info->get_total_memory());
+                peak = max(peak, (size_t)mat_info->template get_total_memory<double>());
                 total = max(total, left_total[i] +
                                        right_total[n_sites + 1 - (i + 2)] +
-                                       mat_info->get_total_memory());
+                                       mat_info->template get_total_memory<double>());
                 mat_info->deallocate();
             }
         } else

@@ -756,14 +756,16 @@ template <typename S> void bind_sparse(py::module &m) {
         .def_readwrite("is_wavefunction", &SparseMatrixInfo<S>::is_wavefunction)
         .def_readwrite("n", &SparseMatrixInfo<S>::n)
         .def_readwrite("cinfo", &SparseMatrixInfo<S>::cinfo)
+        .def_readwrite("block_shifts_fl_size",
+                       &SparseMatrixInfo<S>::block_shifts_fl_size)
         .def_property_readonly("quanta",
                                [](SparseMatrixInfo<S> *self) {
                                    return Array<S>(self->quanta, self->n);
                                })
-        .def_property_readonly("n_states_total",
+        .def_property_readonly("block_shifts",
                                [](SparseMatrixInfo<S> *self) {
                                    return py::array_t<uint32_t>(
-                                       self->n, self->n_states_total);
+                                       self->n, self->block_shifts);
                                })
         .def_property_readonly("n_states_bra",
                                [](SparseMatrixInfo<S> *self) {
@@ -784,8 +786,9 @@ template <typename S> void bind_sparse(py::module &m) {
         .def("initialize_dm", &SparseMatrixInfo<S>::initialize_dm)
         .def("find_state", &SparseMatrixInfo<S>::find_state, py::arg("q"),
              py::arg("start") = 0)
-        .def_property_readonly("total_memory",
-                               &SparseMatrixInfo<S>::get_total_memory)
+        .def_property_readonly(
+            "total_memory_double",
+            &SparseMatrixInfo<S>::template get_total_memory<double>)
         .def("allocate", &SparseMatrixInfo<S>::allocate, py::arg("length"),
              py::arg("ptr") = nullptr)
         .def("extract_state_info", &SparseMatrixInfo<S>::extract_state_info,
@@ -1704,6 +1707,9 @@ template <typename S = void> void bind_types(py::module &m) {
         .value("SimpleTasked", SeqTypes::SimpleTasked)
         .value("Simd", SeqTypes::Simd)
         .value("SimdTasked", SeqTypes::SimdTasked)
+        .value("Aligned32B", SeqTypes::Aligned32B)
+        .value("Aligned64B", SeqTypes::Aligned64B)
+        .value("Aligned", SeqTypes::Aligned)
         .def(py::self & py::self)
         .def(py::self | py::self);
 

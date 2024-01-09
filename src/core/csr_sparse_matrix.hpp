@@ -55,9 +55,9 @@ struct CSRSparseMatrix : SparseMatrix<S, FL> {
         return SparseMatrixTypes::CSR;
     }
     void allocate(const shared_ptr<SparseMatrixInfo<S>> &info,
-                  FL *ptr = 0) override {
+                  FL *ptr = nullptr) override {
         this->info = info;
-        assert(ptr == 0);
+        assert(ptr == nullptr);
         csr_data.resize(info->n);
         for (int i = 0; i < info->n; i++)
             csr_data[i] = make_shared<GCSRMatrix<FL>>(

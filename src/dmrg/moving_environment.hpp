@@ -2628,11 +2628,6 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
             rinfo->n_states_bra[i] = trace_right ? ts[ilr[i]]->shape[0] : im[i];
             rinfo->n_states_ket[i] = trace_right ? im[i] : ts[ilr[i]]->shape[1];
         }
-        rinfo->n_states_total[0] = 0;
-        for (int i = 0; i < kk - 1; i++)
-            rinfo->n_states_total[i + 1] =
-                rinfo->n_states_total[i] +
-                (uint32_t)rinfo->n_states_bra[i] * rinfo->n_states_ket[i];
         return rinfo;
     }
     // Get wavefunction matrix info from svd info
@@ -2677,7 +2672,7 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
             }
             j += (int)idx_dm_to_wfn[ilr[i]].size();
         }
-        winfo->sort_states();
+        winfo->sort_blocks();
         return winfo;
     }
     // Get rotation matrix info from density matrix info
@@ -2699,11 +2694,6 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
             rinfo->n_states_ket[i] =
                 trace_right ? im[i] : dminfo->n_states_ket[ilr[i]];
         }
-        rinfo->n_states_total[0] = 0;
-        for (int i = 0; i < kk - 1; i++)
-            rinfo->n_states_total[i + 1] =
-                rinfo->n_states_total[i] +
-                (uint32_t)rinfo->n_states_bra[i] * rinfo->n_states_ket[i];
         return rinfo;
     }
     // Get wavefunction matrix info from density matrix info
@@ -2748,7 +2738,7 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
             }
             j += (int)idx_dm_to_wfn[ilr[i]].size();
         }
-        winfo->sort_states();
+        winfo->sort_blocks();
         return winfo;
     }
     // Split wavefunction to two MPS tensors using svd
@@ -2838,7 +2828,7 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
             for (int i = 0; i < kk; i++) {
                 for (ubond_t j = 0; j < im[i]; j++)
                     GMatrixFunctions<FLS>::copy(
-                        GMatrix<FLS>(left->data + linfo->n_states_total[i] + j,
+                        GMatrix<FLS>(left->data + linfo->block_shifts[i] + j,
                                      linfo->n_states_bra[i], 1),
                         GMatrix<FLS>(
                             &l[ss[iss + j].first]->ref()(0, ss[iss + j].second),
@@ -2853,7 +2843,7 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
                         for (ubond_t j = 0; j < im[i]; j++) {
                             GMatrixFunctions<FLS>::copy(
                                 GMatrix<FLS>(right->data +
-                                                 rinfo->n_states_total[ir] +
+                                                 rinfo->block_shifts[ir] +
                                                  j * r[iw]->shape[1],
                                              1, r[iw]->shape[1]),
                                 GMatrix<FLS>(
@@ -2861,7 +2851,7 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
                                     r[iw]->shape[1]));
                             GMatrixFunctions<FLS>::iscale(
                                 GMatrix<FLS>(right->data +
-                                                 rinfo->n_states_total[ir] +
+                                                 rinfo->block_shifts[ir] +
                                                  j * r[iw]->shape[1],
                                              1, r[iw]->shape[1]),
                                 (*s[ss[iss + j].first]
@@ -2880,7 +2870,7 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
             for (int i = 0; i < kk; i++) {
                 for (ubond_t j = 0; j < im[i]; j++)
                     GMatrixFunctions<FLS>::copy(
-                        GMatrix<FLS>(right->data + rinfo->n_states_total[i] +
+                        GMatrix<FLS>(right->data + rinfo->block_shifts[i] +
                                          j * r[ss[iss + j].first]->shape[1],
                                      1, r[ss[iss + j].first]->shape[1]),
                         GMatrix<FLS>(
@@ -2895,7 +2885,7 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
                         for (ubond_t j = 0; j < im[i]; j++) {
                             GMatrixFunctions<FLS>::copy(
                                 GMatrix<FLS>(left->data +
-                                                 linfo->n_states_total[il] + j,
+                                                 linfo->block_shifts[il] + j,
                                              linfo->n_states_bra[il], 1),
                                 GMatrix<FLS>(
                                     &l[iw]->ref()(0, ss[iss + j].second),
@@ -2903,7 +2893,7 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
                                 linfo->n_states_ket[il], l[iw]->shape[1]);
                             GMatrixFunctions<FLS>::iscale(
                                 GMatrix<FLS>(left->data +
-                                                 linfo->n_states_total[il] + j,
+                                                 linfo->block_shifts[il] + j,
                                              linfo->n_states_bra[il], 1),
                                 (*s[ss[iss + j].first]
                                       ->data)[ss[iss + j].second],
@@ -2970,7 +2960,7 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
             for (int i = 0; i < kk; i++) {
                 for (ubond_t j = 0; j < im[i]; j++)
                     GMatrixFunctions<FLS>::copy(
-                        GMatrix<FLS>(left->data + linfo->n_states_total[i] + j,
+                        GMatrix<FLS>(left->data + linfo->block_shifts[i] + j,
                                      linfo->n_states_bra[i], 1),
                         GMatrix<FLS>(
                             &(*dm)[ss[iss + j].first](ss[iss + j].second, 0),
@@ -2995,7 +2985,7 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
             for (int i = 0; i < kk; i++) {
                 for (ubond_t j = 0; j < im[i]; j++)
                     GMatrixFunctions<FLS>::copy(
-                        GMatrix<FLS>(right->data + rinfo->n_states_total[i] +
+                        GMatrix<FLS>(right->data + rinfo->block_shifts[i] +
                                          j * (*right)[i].n,
                                      1, (*right)[i].n),
                         GMatrix<FLS>(
@@ -3078,8 +3068,7 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
             for (int i = 0; i < kk; i++) {
                 for (ubond_t j = 0; j < im[i]; j++)
                     GMatrixFunctions<FLS>::copy(
-                        GMatrix<FLS>(rot_mat->data + rinfo->n_states_total[i] +
-                                         j,
+                        GMatrix<FLS>(rot_mat->data + rinfo->block_shifts[i] + j,
                                      rinfo->n_states_bra[i], 1),
                         GMatrix<FLS>(
                             &(*dm)[ss[iss + j].first](ss[iss + j].second, 0),
@@ -3107,7 +3096,7 @@ template <typename S, typename FL, typename FLS> struct MovingEnvironment {
             for (int i = 0; i < kk; i++) {
                 for (ubond_t j = 0; j < im[i]; j++)
                     GMatrixFunctions<FLS>::copy(
-                        GMatrix<FLS>(rot_mat->data + rinfo->n_states_total[i] +
+                        GMatrix<FLS>(rot_mat->data + rinfo->block_shifts[i] +
                                          j * (*rot_mat)[i].n,
                                      1, (*rot_mat)[i].n),
                         GMatrix<FLS>(

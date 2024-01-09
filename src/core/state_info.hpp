@@ -117,8 +117,8 @@ struct StateInfo<S,
         ofs.close();
     }
     // need length * 2
-    void allocate(int length, uint32_t *ptr = 0) {
-        if (ptr == 0) {
+    void allocate(int length, uint32_t *ptr = nullptr) {
+        if (ptr == nullptr) {
             vdata = make_shared<vector<uint32_t>>(_SI_MEM_SIZE(length));
             ptr = vdata->data();
         }
@@ -366,8 +366,8 @@ struct StateProbability<
         allocate(1);
         quanta[0] = q, probs[0] = 1;
     }
-    void allocate(int length, uint32_t *ptr = 0) {
-        if (ptr == 0) {
+    void allocate(int length, uint32_t *ptr = nullptr) {
+        if (ptr == nullptr) {
             vdata = make_shared<vector<uint32_t>>(
                 (length << 1) + length * (sizeof(S) >> 2) + 1);
             ptr = vdata->data();

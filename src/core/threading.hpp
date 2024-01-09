@@ -133,11 +133,14 @@ enum struct SeqTypes : uint8_t {
                       //!< the Davidson matrix-vector step, and the same as
                       //!< ``SeqTypes::Simple`` for other steps.
     Simd = 8,
-    SimdTasked = 12
+    SimdTasked = 12,
+    Aligned32B = 32,
+    Aligned64B = 64,
+    Aligned = 32 | 64
 };
 
-inline bool operator&(SeqTypes a, SeqTypes b) {
-    return ((uint8_t)a & (uint8_t)b) != 0;
+inline uint8_t operator&(SeqTypes a, SeqTypes b) {
+    return (uint8_t)a & (uint8_t)b;
 }
 
 inline SeqTypes operator|(SeqTypes a, SeqTypes b) {
@@ -145,11 +148,11 @@ inline SeqTypes operator|(SeqTypes a, SeqTypes b) {
 }
 
 inline bool seq_type_is_trivial(SeqTypes x) noexcept {
-    return x == SeqTypes::None || x == SeqTypes::Simd;
+    return ((uint8_t)x & ~(uint8_t)(SeqTypes::Simd | SeqTypes::Aligned)) == 0;
 }
 
 inline SeqTypes seq_type_make_trivial(SeqTypes x) noexcept {
-    return (x & SeqTypes::Simd) ? SeqTypes::Simd : SeqTypes::None;
+    return (SeqTypes)(x & (SeqTypes::Simd | SeqTypes::Aligned));
 }
 
 /**
@@ -269,22 +272,22 @@ struct Threading {
     }
     /** Return a string indicating which ``SeqTypes`` is used. */
     string get_seq_type() const {
-        if (seq_type == SeqTypes::Auto)
-            return "Auto";
-        else if (seq_type == SeqTypes::Simd)
-            return "Simd";
-        else if (seq_type == SeqTypes::SimdTasked)
-            return "SimdTasked";
-        else if (seq_type == SeqTypes::Tasked)
-            return "Tasked";
-        else if (seq_type == SeqTypes::SimpleTasked)
-            return "SimpleTasked";
-        else if (seq_type == SeqTypes::Simple)
-            return "Simple";
-        else if (seq_type == SeqTypes::None)
-            return "None";
-        else
-            return "???";
+        stringstream ss;
+        if (seq_type == SeqTypes::None)
+            ss << "None";
+        if (seq_type & SeqTypes::Auto)
+            ss << "Auto";
+        if (seq_type & SeqTypes::Simd)
+            ss << "Simd";
+        if (seq_type & SeqTypes::Simple)
+            ss << "Simple";
+        if (seq_type & SeqTypes::Tasked)
+            ss << "Tasked";
+        if (seq_type & SeqTypes::Aligned32B)
+            ss << "|Aligned32B";
+        if (seq_type & SeqTypes::Aligned64B)
+            ss << "|Aligned64B";
+        return ss.str();
     }
     /** If inside a openMP parallel region, return the id
      * of the current thread. */
