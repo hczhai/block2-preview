@@ -590,7 +590,9 @@ struct AdvancedGEMM<FL,
         }
     }
     static void post_three_rotate(const shared_ptr<BatchGEMM<FL>> &batch,
-                                  uint8_t x) {}
+                                  uint8_t x) {
+        batch->acidxs.push_back(0);
+    }
 };
 
 template <typename FL>
