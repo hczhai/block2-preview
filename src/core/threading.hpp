@@ -102,7 +102,7 @@ inline ThreadingTypes operator^(ThreadingTypes a, ThreadingTypes b) {
  * but one can still use ``SeqTypes::Simple`` and it will only parallelize
  * dense matrix multiplication.
  */
-enum struct SeqTypes : uint8_t {
+enum struct SeqTypes : uint16_t {
     None = 0,   //!< GEMM are not parallelized. Parallelism may happen inside
                 //!<   each GEMM, if a threaded version of MKL is linked.
     Simple = 1, //!< GEMM written to the different outputs are parallelized,
@@ -133,26 +133,29 @@ enum struct SeqTypes : uint8_t {
                       //!< the Davidson matrix-vector step, and the same as
                       //!< ``SeqTypes::Simple`` for other steps.
     Simd = 8,
+    FullCopy = 16,
     SimdTasked = 12,
     Aligned32B = 32,
     Aligned64B = 64,
     Aligned = 32 | 64
 };
 
-inline uint8_t operator&(SeqTypes a, SeqTypes b) {
-    return (uint8_t)a & (uint8_t)b;
+inline uint16_t operator&(SeqTypes a, SeqTypes b) {
+    return (uint16_t)a & (uint16_t)b;
 }
 
 inline SeqTypes operator|(SeqTypes a, SeqTypes b) {
-    return SeqTypes((uint8_t)a | (uint8_t)b);
+    return SeqTypes((uint16_t)a | (uint16_t)b);
 }
 
 inline bool seq_type_is_trivial(SeqTypes x) noexcept {
-    return ((uint8_t)x & ~(uint8_t)(SeqTypes::Simd | SeqTypes::Aligned)) == 0;
+    return ((uint16_t)x & ~(uint16_t)(SeqTypes::Simd | SeqTypes::Aligned |
+                                      SeqTypes::FullCopy)) == 0;
 }
 
 inline SeqTypes seq_type_make_trivial(SeqTypes x) noexcept {
-    return (SeqTypes)(x & (SeqTypes::Simd | SeqTypes::Aligned));
+    return (SeqTypes)(x & (SeqTypes::Simd | SeqTypes::Aligned |
+                           SeqTypes::FullCopy));
 }
 
 /**
@@ -283,6 +286,8 @@ struct Threading {
             ss << "Simple";
         if (seq_type & SeqTypes::Tasked)
             ss << "Tasked";
+        if (seq_type & SeqTypes::FullCopy)
+            ss << "|FullCopy";
         if (seq_type & SeqTypes::Aligned32B)
             ss << "|Aligned32B";
         if (seq_type & SeqTypes::Aligned64B)

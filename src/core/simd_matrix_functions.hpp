@@ -596,31 +596,60 @@ struct SimdMatrixFunctions<
                 b[nk - 1 + mi * nk] = a[nk - 1 + mi * lda];
         }
     }
+    template <size_t nk, size_t ni>
+    static void avx_full_copy(uint8_t ta, size_t pk, size_t pi, const double *a,
+                              size_t lda, double *__restrict__ b) {
+        // b[pk, pi, i / 4, k, 4]
+        for (size_t kk = 0; kk < pk; kk += nk) {
+            const size_t nnk = min(pk - kk, nk);
+            for (size_t ii = 0; ii < pi; ii += ni) {
+                const size_t nni = min(pi - ii, ni);
+                if (ta)
+                    avx_ncopy_4(nni, nnk, &a[kk + ii * lda], lda,
+                                &b[kk * pi + ii * nnk]);
+                else
+                    avx_tcopy_4(nni, nnk, &a[ii + kk * lda], lda,
+                                &b[kk * pi + ii * nnk]);
+            }
+        }
+    }
+    template <uint8_t full_copy, size_t ni, size_t nj, size_t nk>
     static void avx_gemm(uint8_t ta, uint8_t tb, size_t m, size_t n, size_t k,
-                         size_t ni, size_t nj, size_t nk, double alpha,
-                         const double *a, size_t lda, const double *b,
-                         size_t ldb, double beta, double *c, size_t ldc) {
-        double *__restrict__ pa = (double *)aligned_alloc(
-            32, min(k, nk) * min(m, ni) * sizeof(double));
-        double *__restrict__ pb =
-            (double *)aligned_alloc(32, min(k, nk) * n * sizeof(double));
+                         double alpha, const double *a, size_t lda,
+                         const double *b, size_t ldb, double beta, double *c,
+                         size_t ldc) {
+        double *__restrict__ xa = nullptr, *__restrict__ xb = nullptr;
+        if (full_copy) {
+            xa = (double *)aligned_alloc(32, k * m * sizeof(double));
+            xb = (double *)aligned_alloc(32, k * n * sizeof(double));
+            avx_full_copy<nk, ni>(ta, k, m, a, lda, xa);
+            avx_full_copy<nk, nj>(!tb, k, n, b, ldb, xb);
+        } else {
+            xa = (double *)aligned_alloc(32, min(k, nk) * min(m, ni) *
+                                                 sizeof(double));
+            xb = (double *)aligned_alloc(32, min(k, nk) * n * sizeof(double));
+        }
         for (size_t kk = 0; kk < k; kk += nk) {
             const size_t nnk = min(k - kk, nk);
             for (size_t ii = 0; ii < m; ii += ni) {
                 const size_t nni = min(m - ii, ni);
-                if (ta)
-                    avx_ncopy_4(nni, nnk, &a[kk + ii * lda], lda, &pa[0]);
-                else
-                    avx_tcopy_4(nni, nnk, &a[ii + kk * lda], lda, &pa[0]);
+                double *__restrict__ pa =
+                    full_copy ? &xa[kk * m + ii * nnk] : &xa[0];
+                if (!full_copy) {
+                    if (ta)
+                        avx_ncopy_4(nni, nnk, &a[kk + ii * lda], lda, pa);
+                    else
+                        avx_tcopy_4(nni, nnk, &a[ii + kk * lda], lda, pa);
+                }
                 for (size_t jj = 0; jj < n; jj += nj) {
                     const size_t nnj = min(n - jj, nj);
-                    if (ii == 0) {
+                    double *__restrict__ pb =
+                        full_copy ? &xb[kk * n + jj * nnk] : &xb[jj * nnk];
+                    if (!full_copy && ii == 0) {
                         if (tb)
-                            avx_tcopy_4(nnj, nnk, &b[jj + kk * ldb], ldb,
-                                        &pb[jj * nnk]);
+                            avx_tcopy_4(nnj, nnk, &b[jj + kk * ldb], ldb, pb);
                         else
-                            avx_ncopy_4(nnj, nnk, &b[kk + jj * ldb], ldb,
-                                        &pb[jj * nnk]);
+                            avx_ncopy_4(nnj, nnk, &b[kk + jj * ldb], ldb, pb);
                     }
                     __m256d x0, x1, x2, y0, z0, z1, z2, z3, z4, z5, z6, z7, z8,
                         z9, z10, z11;
@@ -629,10 +658,10 @@ struct SimdMatrixFunctions<
                         size_t xnni = nni / 12 * 12;
                         for (size_t xi = 0; xi < xnni; xi += 12)
                             for (size_t xj = 0; xj < xnnj; xj += 4) {
-                                double *px0 = &pa[xi * nnk];
-                                double *px1 = &pa[(xi + 4) * nnk];
-                                double *px2 = &pa[(xi + 8) * nnk];
-                                double *py = &pb[(jj + xj) * nnk];
+                                const double *px0 = &pa[xi * nnk];
+                                const double *px1 = &pa[(xi + 4) * nnk];
+                                const double *px2 = &pa[(xi + 8) * nnk];
+                                const double *py = &pb[xj * nnk];
                                 double *pz = &c[(ii + xi) + (jj + xj) * ldc];
                                 z0 = _mm256_setzero_pd();
                                 z1 = _mm256_setzero_pd();
@@ -732,9 +761,9 @@ struct SimdMatrixFunctions<
                             }
                         if ((nni - xnni) & 8) {
                             for (size_t xj = 0; xj < xnnj; xj += 4) {
-                                double *px0 = &pa[xnni * nnk];
-                                double *px1 = &pa[(xnni + 4) * nnk];
-                                double *py = &pb[(jj + xj) * nnk];
+                                const double *px0 = &pa[xnni * nnk];
+                                const double *px1 = &pa[(xnni + 4) * nnk];
+                                const double *py = &pb[xj * nnk];
                                 double *pz = &c[(ii + xnni) + (jj + xj) * ldc];
                                 z0 = _mm256_setzero_pd();
                                 z1 = _mm256_setzero_pd();
@@ -811,8 +840,8 @@ struct SimdMatrixFunctions<
                         }
                         if ((nni - xnni) & 4) {
                             for (size_t xj = 0; xj < xnnj; xj += 4) {
-                                double *px0 = &pa[xnni * nnk];
-                                double *py = &pb[(jj + xj) * nnk];
+                                const double *px0 = &pa[xnni * nnk];
+                                const double *py = &pb[xj * nnk];
                                 double *pz = &c[(ii + xnni) + (jj + xj) * ldc];
                                 z0 = _mm256_setzero_pd();
                                 z3 = _mm256_setzero_pd();
@@ -862,8 +891,8 @@ struct SimdMatrixFunctions<
                         if ((nni - xnni) & 2) {
                             __m128d w0, w1, w2, w3, wx0;
                             for (size_t xj = 0; xj < xnnj; xj += 4) {
-                                double *px0 = &pa[xnni * nnk];
-                                double *py = &pb[(jj + xj) * nnk];
+                                const double *px0 = &pa[xnni * nnk];
+                                const double *py = &pb[xj * nnk];
                                 double *pz = &c[(ii + xnni) + (jj + xj) * ldc];
                                 w0 = _mm_setzero_pd();
                                 w1 = _mm_setzero_pd();
@@ -908,8 +937,8 @@ struct SimdMatrixFunctions<
                         }
                         if ((nni - xnni) & 1) {
                             for (size_t xj = 0; xj < xnnj; xj += 4) {
-                                double *px0 = &pa[xnni * nnk];
-                                double *py = &pb[(jj + xj) * nnk];
+                                const double *px0 = &pa[xnni * nnk];
+                                const double *py = &pb[xj * nnk];
                                 double *pz = &c[(ii + xnni) + (jj + xj) * ldc];
                                 z0 = _mm256_setzero_pd();
                                 for (size_t xk = 0; xk < nnk; xk++) {
@@ -948,9 +977,9 @@ struct SimdMatrixFunctions<
                     if ((nnj - xnnj) & 2) {
                         size_t xnni = nni >> 3 << 3;
                         for (size_t xi = 0; xi < xnni; xi += 8) {
-                            double *px0 = &pa[xi * nnk];
-                            double *px1 = &pa[(xi + 4) * nnk];
-                            double *py = &pb[(jj + xnnj) * nnk];
+                            const double *px0 = &pa[xi * nnk];
+                            const double *px1 = &pa[(xi + 4) * nnk];
+                            const double *py = &pb[xnnj * nnk];
                             double *pz = &c[(ii + xi) + (jj + xnnj) * ldc];
                             z0 = _mm256_setzero_pd();
                             z1 = _mm256_setzero_pd();
@@ -991,8 +1020,8 @@ struct SimdMatrixFunctions<
                             _mm256_storeu_pd(&pz[4 + 1 * ldc], z4);
                         }
                         if ((nni - xnni) & 4) {
-                            double *px0 = &pa[xnni * nnk];
-                            double *py = &pb[(jj + xnnj) * nnk];
+                            const double *px0 = &pa[xnni * nnk];
+                            const double *py = &pb[xnnj * nnk];
                             double *pz = &c[(ii + xnni) + (jj + xnnj) * ldc];
                             z0 = _mm256_setzero_pd();
                             z3 = _mm256_setzero_pd();
@@ -1024,8 +1053,8 @@ struct SimdMatrixFunctions<
                         }
                         if ((nni - xnni) & 2) {
                             __m128d w0, w1, w2, w3, wx0;
-                            double *px0 = &pa[xnni * nnk];
-                            double *py = &pb[(jj + xnnj) * nnk];
+                            const double *px0 = &pa[xnni * nnk];
+                            const double *py = &pb[xnnj * nnk];
                             double *pz = &c[(ii + xnni) + (jj + xnnj) * ldc];
                             w0 = _mm_setzero_pd();
                             w1 = _mm_setzero_pd();
@@ -1055,8 +1084,8 @@ struct SimdMatrixFunctions<
                         }
                         if ((nni - xnni) & 1) {
                             __m128d w0, w1;
-                            double *px0 = &pa[xnni * nnk];
-                            double *py = &pb[(jj + xnnj) * nnk];
+                            const double *px0 = &pa[xnni * nnk];
+                            const double *py = &pb[xnnj * nnk];
                             double *pz = &c[(ii + xnni) + (jj + xnnj) * ldc];
                             w0 = _mm_setzero_pd();
                             for (size_t xk = 0; xk < nnk; xk++) {
@@ -1085,9 +1114,9 @@ struct SimdMatrixFunctions<
                     if ((nnj - xnnj) & 1) {
                         size_t xnni = nni >> 3 << 3;
                         for (size_t xi = 0; xi < xnni; xi += 8) {
-                            double *px0 = &pa[xi * nnk];
-                            double *px1 = &pa[(xi + 4) * nnk];
-                            double *py = &pb[(jj + xnnj) * nnk];
+                            const double *px0 = &pa[xi * nnk];
+                            const double *px1 = &pa[(xi + 4) * nnk];
+                            const double *py = &pb[xnnj * nnk];
                             double *pz = &c[(ii + xi) + (jj + xnnj) * ldc];
                             z0 = _mm256_setzero_pd();
                             z1 = _mm256_setzero_pd();
@@ -1116,8 +1145,8 @@ struct SimdMatrixFunctions<
                             _mm256_storeu_pd(&pz[4 + 0 * ldc], z1);
                         }
                         if ((nni - xnni) & 4) {
-                            double *px0 = &pa[xnni * nnk];
-                            double *py = &pb[(jj + xnnj) * nnk];
+                            const double *px0 = &pa[xnni * nnk];
+                            const double *py = &pb[xnnj * nnk];
                             double *pz = &c[(ii + xnni) + (jj + xnnj) * ldc];
                             z0 = _mm256_setzero_pd();
                             for (size_t xk = 0; xk < nnk; xk++) {
@@ -1139,8 +1168,8 @@ struct SimdMatrixFunctions<
                         }
                         if ((nni - xnni) & 2) {
                             __m128d w0, w1, w2, w3, wx0;
-                            double *px0 = &pa[xnni * nnk];
-                            double *py = &pb[(jj + xnnj) * nnk];
+                            const double *px0 = &pa[xnni * nnk];
+                            const double *py = &pb[xnnj * nnk];
                             double *pz = &c[(ii + xnni) + (jj + xnnj) * ldc];
                             w0 = _mm_setzero_pd();
                             for (size_t xk = 0; xk < nnk; xk++) {
@@ -1160,8 +1189,8 @@ struct SimdMatrixFunctions<
                             xnni += 2;
                         }
                         if ((nni - xnni) & 1) {
-                            double *__restrict__ px0 = &pa[xnni * nnk];
-                            double *__restrict__ py = &pb[(jj + xnnj) * nnk];
+                            const double *__restrict__ px0 = &pa[xnni * nnk];
+                            const double *__restrict__ py = &pb[xnnj * nnk];
                             double *__restrict__ pz =
                                 &c[(ii + xnni) + (jj + xnnj) * ldc];
                             double zz0 = 0.0;
@@ -1179,8 +1208,8 @@ struct SimdMatrixFunctions<
                 }
             }
         }
-        free(pa);
-        free(pb);
+        free(xa);
+        free(xb);
     }
 };
 

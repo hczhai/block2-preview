@@ -1706,6 +1706,7 @@ template <typename S = void> void bind_types(py::module &m) {
         .value("Tasked", SeqTypes::Tasked)
         .value("SimpleTasked", SeqTypes::SimpleTasked)
         .value("Simd", SeqTypes::Simd)
+        .value("FullCopy", SeqTypes::FullCopy)
         .value("SimdTasked", SeqTypes::SimdTasked)
         .value("Aligned32B", SeqTypes::Aligned32B)
         .value("Aligned64B", SeqTypes::Aligned64B)

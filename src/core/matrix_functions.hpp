@@ -308,13 +308,20 @@ inline void xgemm<double>(const char *transa, const char *transb,
                           const MKL_INT *ldb, const double *beta, double *c,
                           const MKL_INT *ldc) noexcept {
 #if defined(_HAS_SIMD_OPT)
-    return threading_()->seq_type & SeqTypes::Simd
-               ? SimdMatrixFunctions<double>::avx_gemm(
-                     !(*transa == 'n' || *transa == 'N'),
-                     !(*transb == 'n' || *transb == 'N'), *m, *n, *k, 512, 24,
-                     256, *alpha, a, *lda, b, *ldb, *beta, c, *ldc)
-               : FNAME(dgemm)(transa, transb, m, n, k, alpha, a, lda, b, ldb,
-                              beta, c, ldc);
+    if (threading_()->seq_type & SeqTypes::Simd) {
+        if (threading_()->seq_type & SeqTypes::FullCopy)
+            return SimdMatrixFunctions<double>::avx_gemm<1, 512, 24, 256>(
+                !(*transa == 'n' || *transa == 'N'),
+                !(*transb == 'n' || *transb == 'N'), *m, *n, *k, *alpha, a,
+                *lda, b, *ldb, *beta, c, *ldc);
+        else
+            return SimdMatrixFunctions<double>::avx_gemm<0, 512, 24, 256>(
+                !(*transa == 'n' || *transa == 'N'),
+                !(*transb == 'n' || *transb == 'N'), *m, *n, *k, *alpha, a,
+                *lda, b, *ldb, *beta, c, *ldc);
+    } else
+        return FNAME(dgemm)(transa, transb, m, n, k, alpha, a, lda, b, ldb,
+                            beta, c, ldc);
 #elif defined(_HAS_BLIS)
     trans_t blis_transa, blis_transb;
     map_char_to_blis_trans(*transa, &blis_transa);
