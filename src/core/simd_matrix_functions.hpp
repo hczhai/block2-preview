@@ -623,7 +623,7 @@ struct SimdMatrixFunctions<
             xa = (double *)aligned_alloc(32, k * m * sizeof(double));
             xb = (double *)aligned_alloc(32, k * n * sizeof(double));
             avx_full_copy<nk, ni>(ta, k, m, a, lda, xa);
-            avx_full_copy<nk, nj>(!tb, k, n, b, ldb, xb);
+            avx_full_copy<nk, ni>(!tb, k, n, b, ldb, xb);
         } else {
             xa = (double *)aligned_alloc(32, min(k, nk) * min(m, ni) *
                                                  sizeof(double));
