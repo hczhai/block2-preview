@@ -584,13 +584,13 @@ struct AdvancedGEMM<FL,
         size_t ba = (size_t)a.n * bra.m * bra.n +
                     (size_t)ket.m * ket.n * ((conj_bra & 1) ? bra.n : bra.m);
         if (ak <= ba) {
-            GMatrix<FL> work((FL *)0 + batch[0]->work, a.m,
-                             (conj_ket & 1) ? ket.m : ket.n);
-            AdvancedGEMM<FL>::multiply(batch[0], a, false, ket, conj_ket, work,
+            GMatrix<FL> work((FL *)0 + batch[0]->work,
+                             (conj_ket & 1) ? ket.m : ket.n, a.m);
+            AdvancedGEMM<FL>::multiply(batch[0], ket, conj_ket ^ 1, a, true, work,
                                        1.0, 0.0);
-            AdvancedGEMM<FL>::multiply(batch[1], bra, conj_bra, work, false, c,
+            AdvancedGEMM<FL>::multiply(batch[1], bra, conj_bra, work, true, c,
                                        scale, 1.0);
-            batch[0]->acidxs.push_back(0);
+            batch[0]->acidxs.push_back(2);
             return work.size();
         } else {
             GMatrix<FL> work((FL *)0 + batch[0]->work,
@@ -1687,11 +1687,14 @@ template <typename FL> struct BatchGEMMSeq {
                                   k1z = batch[1]->acc_gp[i];
                         const size_t wshift =
                             works[tid].data - batch[0]->c[k0z];
+                        const bool xta = batch[0]->ta[i] != CblasNoTrans;
+                        const bool xtb = batch[0]->tb[i] != CblasNoTrans;
                         if (!(batch[0]->acidxs[i] & 2))
                             for (MKL_INT k0 = k0z; k0 < k0z + batch[0]->gp[i];
                                  k0++)
                                 batch[0]->perform_single(
-                                    i, batch[0]->a[k0] + lcshift,
+                                    i,
+                                    batch[0]->a[k0] + (xta ? rcshift : lcshift),
                                     batch[0]->b[k0], batch[0]->c[k0] + wshift,
                                     1.0, precopied);
                         else
@@ -1699,9 +1702,8 @@ template <typename FL> struct BatchGEMMSeq {
                                  k0++)
                                 batch[0]->perform_single(
                                     i, batch[0]->a[k0],
-                                    batch[0]->b[k0] + rcshift,
-                                    batch[0]->c[k0] + wshift, 1.0,
-                                    precopied);
+                                    batch[0]->b[k0] + (xtb ? lcshift : rcshift),
+                                    batch[0]->c[k0] + wshift, 1.0, precopied);
                         if (!(batch[0]->acidxs[i] & 1))
                             for (MKL_INT k1 = k1z; k1 < k1z + batch[1]->gp[i];
                                  k1++)
