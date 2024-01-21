@@ -212,7 +212,7 @@ single_xgemm(const CBLAS_LAYOUT Layout, const CBLAS_TRANSPOSE *TransA_Array,
              const FL *alpha_Array, const FL *A, const MKL_INT *lda_Array,
              const FL *B, const MKL_INT *ldb_Array, const FL *beta_Array, FL *C,
              const MKL_INT *ldc_Array, const MKL_INT *group_size,
-             FL scale = 1.0) {
+             FL scale = 1.0, uint8_t precopied = 0) {
     const MKL_INT ig = 0, i = 0;
     const char *tra =
         TransA_Array[ig] == CblasNoTrans
@@ -230,7 +230,21 @@ single_xgemm(const CBLAS_LAYOUT Layout, const CBLAS_TRANSPOSE *TransA_Array,
     const FL alpha = alpha_Array[ig] * scale, beta = beta_Array[ig];
     const MKL_INT lda = lda_Array[ig], ldb = ldb_Array[ig], ldc = ldc_Array[ig];
     const MKL_INT gsize = group_size[ig];
-    xgemm<FL>(trb, tra, &n, &m, &k, &alpha, B, &ldb, A, &lda, &beta, C, &ldc);
+    if (precopied == 2)
+        SimdMatrixFunctions<FL>::template avx_gemm<2, 512, 24, 256>(
+            !(*trb == 'n' || *trb == 'N'), !(*tra == 'n' || *tra == 'N'), n, m,
+            k, alpha, B, ldb, A, lda, beta, C, ldc);
+    else if (precopied == 3)
+        SimdMatrixFunctions<FL>::template avx_gemm<3, 512, 24, 256>(
+            !(*trb == 'n' || *trb == 'N'), !(*tra == 'n' || *tra == 'N'), n, m,
+            k, alpha, B, ldb, A, lda, beta, C, ldc);
+    else if (precopied == 4)
+        SimdMatrixFunctions<FL>::template avx_gemm<4, 512, 24, 256>(
+            !(*trb == 'n' || *trb == 'N'), !(*tra == 'n' || *tra == 'N'), n, m,
+            k, alpha, B, ldb, A, lda, beta, C, ldc);
+    else
+        xgemm<FL>(trb, tra, &n, &m, &k, &alpha, B, &ldb, A, &lda, &beta, C,
+                  &ldc);
 }
 
 // The parameters for a series of DGEMM operations
@@ -357,10 +371,10 @@ template <typename FL> struct BatchGEMM {
         }
     }
     inline void perform_single(MKL_INT ii, const FL *a, const FL *b, FL *c,
-                               FL scale = 1.0) {
+                               FL scale = 1.0, uint8_t precopied = 0) {
         single_xgemm<FL>(layout, &ta[ii], &tb[ii], &m[ii], &n[ii], &k[ii],
                          &alpha[ii], a, &lda[ii], b, &ldb[ii], &beta[ii], c,
-                         &ldc[ii], &gp[ii], scale);
+                         &ldc[ii], &gp[ii], scale, precopied);
     }
     void clear() {
         ta.clear(), tb.clear();
@@ -865,6 +879,7 @@ template <typename FL> struct BatchGEMMSeq {
     shared_ptr<vector<FL>> vdata;
     vector<shared_ptr<BatchGEMM<FL>>> batch;
     vector<shared_ptr<BatchGEMM<FL>>> post_batch;
+    vector<GMatrix<FL>> precopy_batch;
     vector<BatchGEMMRef<FL>> refs;
     size_t cumulative_nflop = 0;
     size_t max_batch_flops = 1LU << 30;
@@ -885,6 +900,7 @@ template <typename FL> struct BatchGEMMSeq {
         seq->batch.clear();
         seq->batch.push_back(make_shared<BatchGEMM<FL>>());
         seq->batch.push_back(make_shared<BatchGEMM<FL>>());
+        seq->precopy_batch.clear();
         return seq;
     }
     // [a] = cfactor * [a] + scale * [b]
@@ -1494,6 +1510,56 @@ template <typename FL> struct BatchGEMMSeq {
         cumulative_nflop += batch[1]->nflop;
         clear();
     }
+    void percopy_perform(bool forward, uint8_t trans, size_t in_shift = 0,
+                         size_t out_shift = 0) const {
+        int ntg = threading->activate_global();
+#pragma omp parallel num_threads(ntg)
+        {
+            int tid = threading->get_thread_id();
+            size_t msz = 0;
+#pragma omp for schedule(static)
+            for (size_t i = 0; i < precopy_batch.size(); i++)
+                msz = max(msz, precopy_batch[i].size());
+            FL *xx = (FL *)aligned_alloc(32, msz * sizeof(FL));
+            if (forward && trans) {
+#pragma omp for schedule(static)
+                for (size_t i = 0; i < precopy_batch.size(); i++) {
+                    const GMatrix<FL> &x = precopy_batch[i];
+                    SimdMatrixFunctions<FL>::template avx_full_copy<256, 512>(
+                        1, x.n, x.m, x.data + in_shift, x.n, xx);
+                    memcpy(x.data + out_shift, xx, x.size() * sizeof(FL));
+                }
+            } else if (trans) {
+#pragma omp for schedule(static)
+                for (size_t i = 0; i < precopy_batch.size(); i++) {
+                    const GMatrix<FL> &x = precopy_batch[i];
+                    SimdMatrixFunctions<FL>::template avx_rev_full_copy<256,
+                                                                        512>(
+                        1, x.n, x.m, x.data + in_shift, xx, x.n);
+                    memcpy(x.data + out_shift, xx, sizeof(FL) * x.size());
+                }
+            } else if (forward) {
+#pragma omp for schedule(static)
+                for (size_t i = 0; i < precopy_batch.size(); i++) {
+                    const GMatrix<FL> &x = precopy_batch[i];
+                    SimdMatrixFunctions<FL>::template avx_full_copy<256, 512>(
+                        0, x.m, x.n, x.data + in_shift, x.n, xx);
+                    memcpy(x.data + out_shift, xx, x.size() * sizeof(FL));
+                }
+            } else {
+#pragma omp for schedule(static)
+                for (size_t i = 0; i < precopy_batch.size(); i++) {
+                    const GMatrix<FL> &x = precopy_batch[i];
+                    SimdMatrixFunctions<FL>::template avx_rev_full_copy<256,
+                                                                        512>(
+                        0, x.m, x.n, x.data + in_shift, xx, x.n);
+                    memcpy(x.data + out_shift, xx, sizeof(FL) * x.size());
+                }
+            }
+            free(xx);
+        }
+    }
+    void percopy_clear() { precopy_batch.clear(); }
     // Directly perform batched DGEMM
     void perform() {
         size_t ipost = 0;
@@ -1582,6 +1648,19 @@ template <typename FL> struct BatchGEMMSeq {
                 batch[0]->build_acc_gp();
                 batch[1]->build_acc_gp();
             }
+            uint8_t precopied = (mode & SeqTypes::Precopy) ? 2 : 0;
+            vector<GMatrix<FL>> prec(2, c);
+            size_t lcshift = cshift, rcshift = cshift;
+            shared_ptr<VectorAllocator<FP>> pd_alloc =
+                make_shared<VectorAllocator<FP>>();
+            if (precopied) {
+                prec[0].allocate(pd_alloc);
+                prec[1].allocate(pd_alloc);
+                rcshift = prec[0].data - (FL *)0;
+                lcshift = prec[1].data - (FL *)0;
+                percopy_perform(true, 0, cshift, rcshift);
+                percopy_perform(true, 1, cshift, lcshift);
+            }
 #pragma omp parallel num_threads(ntop)
             {
                 int tid = threading->get_thread_id();
@@ -1612,29 +1691,32 @@ template <typename FL> struct BatchGEMMSeq {
                             for (MKL_INT k0 = k0z; k0 < k0z + batch[0]->gp[i];
                                  k0++)
                                 batch[0]->perform_single(
-                                    i, batch[0]->a[k0] + cshift,
-                                    batch[0]->b[k0], batch[0]->c[k0] + wshift);
+                                    i, batch[0]->a[k0] + lcshift,
+                                    batch[0]->b[k0], batch[0]->c[k0] + wshift,
+                                    1.0, precopied);
                         else
                             for (MKL_INT k0 = k0z; k0 < k0z + batch[0]->gp[i];
                                  k0++)
                                 batch[0]->perform_single(
                                     i, batch[0]->a[k0],
-                                    batch[0]->b[k0] + cshift,
-                                    batch[0]->c[k0] + wshift);
+                                    batch[0]->b[k0] + rcshift,
+                                    batch[0]->c[k0] + wshift, 1.0,
+                                    precopied);
                         if (!(batch[0]->acidxs[i] & 1))
                             for (MKL_INT k1 = k1z; k1 < k1z + batch[1]->gp[i];
                                  k1++)
                                 batch[1]->perform_single(
                                     i, batch[1]->a[k1],
                                     batch[1]->b[k1] + wshift,
-                                    batch[1]->c[k1] + t_vshift, scale);
+                                    batch[1]->c[k1] + t_vshift, scale,
+                                    precopied ? precopied + 2 : 0);
                         else
                             for (MKL_INT k1 = k1z; k1 < k1z + batch[1]->gp[i];
                                  k1++)
                                 batch[1]->perform_single(
                                     i, batch[1]->a[k1] + wshift,
                                     batch[1]->b[k1], batch[1]->c[k1] + t_vshift,
-                                    scale);
+                                    scale, precopied ? precopied + 1 : 0);
                     }
                 }
 #pragma omp single

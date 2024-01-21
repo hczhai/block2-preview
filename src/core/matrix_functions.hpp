@@ -310,12 +310,14 @@ inline void xgemm<double>(const char *transa, const char *transb,
 #if defined(_HAS_SIMD_OPT)
     if (threading_()->seq_type & SeqTypes::Simd) {
         if (threading_()->seq_type & SeqTypes::FullCopy)
-            return SimdMatrixFunctions<double>::avx_gemm<1, 512, 24, 256>(
+            return SimdMatrixFunctions<double>::template avx_gemm<1, 512, 24,
+                                                                  256>(
                 !(*transa == 'n' || *transa == 'N'),
                 !(*transb == 'n' || *transb == 'N'), *m, *n, *k, *alpha, a,
                 *lda, b, *ldb, *beta, c, *ldc);
         else
-            return SimdMatrixFunctions<double>::avx_gemm<0, 512, 24, 256>(
+            return SimdMatrixFunctions<double>::template avx_gemm<0, 512, 24,
+                                                                  256>(
                 !(*transa == 'n' || *transa == 'N'),
                 !(*transb == 'n' || *transb == 'N'), *m, *n, *k, *alpha, a,
                 *lda, b, *ldb, *beta, c, *ldc);

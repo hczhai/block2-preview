@@ -36,6 +36,30 @@ template <typename FL, typename = void> struct SimdMatrixFunctions;
 
 template <typename FL>
 struct SimdMatrixFunctions<
+    FL, typename enable_if<is_same<FL, complex<double>>::value>::type> {
+    template <size_t nk, size_t ni>
+    static void avx_full_copy(uint8_t ta, size_t pk, size_t pi,
+                              const complex<double> *a, size_t lda,
+                              complex<double> *__restrict__ b) {
+        throw runtime_error("!");
+    }
+    template <size_t nk, size_t ni>
+    static void avx_rev_full_copy(uint8_t ta, size_t pk, size_t pi,
+                                  const complex<double> *a,
+                                  complex<double> *__restrict__ b, size_t ldb) {
+        throw runtime_error("!");
+    }
+    template <uint8_t full_copy, size_t ni, size_t nj, size_t nk>
+    static void avx_gemm(uint8_t ta, uint8_t tb, size_t m, size_t n, size_t k,
+                         complex<double> alpha, const complex<double> *a,
+                         size_t lda, const complex<double> *b, size_t ldb,
+                         complex<double> beta, complex<double> *c, size_t ldc) {
+        throw runtime_error("!");
+    }
+};
+
+template <typename FL>
+struct SimdMatrixFunctions<
     FL, typename enable_if<is_same<FL, double>::value>::type> {
     // b[m, n] = beta * b[m, n] + alpha * a[m, n]
     static void avx_matrix_nscale(size_t m, size_t n, size_t ni, size_t nj,
@@ -596,6 +620,176 @@ struct SimdMatrixFunctions<
                 b[nk - 1 + mi * nk] = a[nk - 1 + mi * lda];
         }
     }
+    // copy a[nk, ni] <- b[ni / 4, nk, 4]
+    static void avx_rev_tcopy_4(size_t ni, size_t nk, const double *b,
+                                double *__restrict__ a, size_t lda) {
+        for (size_t mi = ni >> 2 << 2; mi >= 4; mi -= 4) {
+            __m256d x0, x1, x2, x3;
+            for (size_t mk = nk >> 2 << 2; mk >= 4; mk -= 4) {
+                x0 = _mm256_loadu_pd(&b[(mk - 4) * 4 + (mi - 4) * nk]);
+                x1 = _mm256_loadu_pd(&b[(mk - 3) * 4 + (mi - 4) * nk]);
+                x2 = _mm256_loadu_pd(&b[(mk - 2) * 4 + (mi - 4) * nk]);
+                x3 = _mm256_loadu_pd(&b[(mk - 1) * 4 + (mi - 4) * nk]);
+                _mm256_storeu_pd(&a[mi - 4 + (mk - 4) * lda], x0);
+                _mm256_storeu_pd(&a[mi - 4 + (mk - 3) * lda], x1);
+                _mm256_storeu_pd(&a[mi - 4 + (mk - 2) * lda], x2);
+                _mm256_storeu_pd(&a[mi - 4 + (mk - 1) * lda], x3);
+            }
+            if (nk & 2) {
+                const size_t mk = nk >> 1 << 1;
+                x0 = _mm256_loadu_pd(&b[(mk - 2) * 4 + (mi - 4) * nk]);
+                x1 = _mm256_loadu_pd(&b[(mk - 1) * 4 + (mi - 4) * nk]);
+                _mm256_storeu_pd(&a[mi - 4 + (mk - 2) * lda], x0);
+                _mm256_storeu_pd(&a[mi - 4 + (mk - 1) * lda], x1);
+            }
+            if (nk & 1) {
+                x0 = _mm256_loadu_pd(&b[(nk - 1) * 4 + (mi - 4) * nk]);
+                _mm256_storeu_pd(&a[mi - 4 + (nk - 1) * lda], x0);
+            }
+        }
+        if (ni & 2) {
+            const size_t mi = (ni >> 1 << 1) - 2;
+            __m128d x0, x1, x2, x3;
+            for (size_t mk = nk >> 2 << 2; mk >= 4; mk -= 4) {
+                x0 = _mm_loadu_pd(&b[(mk - 4) * 2 + mi * nk]);
+                x1 = _mm_loadu_pd(&b[(mk - 3) * 2 + mi * nk]);
+                x2 = _mm_loadu_pd(&b[(mk - 2) * 2 + mi * nk]);
+                x3 = _mm_loadu_pd(&b[(mk - 1) * 2 + mi * nk]);
+                _mm_storeu_pd(&a[mi + (mk - 4) * lda], x0);
+                _mm_storeu_pd(&a[mi + (mk - 3) * lda], x1);
+                _mm_storeu_pd(&a[mi + (mk - 2) * lda], x2);
+                _mm_storeu_pd(&a[mi + (mk - 1) * lda], x3);
+            }
+            if (nk & 2) {
+                const size_t mk = nk >> 1 << 1;
+                x0 = _mm_loadu_pd(&b[(mk - 2) * 2 + mi * nk]);
+                x1 = _mm_loadu_pd(&b[(mk - 1) * 2 + mi * nk]);
+                _mm_storeu_pd(&a[mi + (mk - 2) * lda], x0);
+                _mm_storeu_pd(&a[mi + (mk - 1) * lda], x1);
+            }
+            if (nk & 1) {
+                x0 = _mm_loadu_pd(&b[(nk - 1) * 2 + mi * nk]);
+                _mm_storeu_pd(&a[mi + (nk - 1) * lda], x0);
+            }
+        }
+        if (ni & 1) {
+            const size_t mi = ni - 1;
+            for (size_t mk = nk >> 2 << 2; mk >= 4; mk -= 4) {
+                a[mi + (mk - 4) * lda] = b[mk - 4 + mi * nk];
+                a[mi + (mk - 3) * lda] = b[mk - 3 + mi * nk];
+                a[mi + (mk - 2) * lda] = b[mk - 2 + mi * nk];
+                a[mi + (mk - 1) * lda] = b[mk - 1 + mi * nk];
+            }
+            if (nk & 2) {
+                const size_t mk = nk >> 1 << 1;
+                a[mi + (mk - 2) * lda] = b[mk - 2 + mi * nk];
+                a[mi + (mk - 1) * lda] = b[mk - 1 + mi * nk];
+            }
+            if (nk & 1)
+                a[mi + (nk - 1) * lda] = b[nk - 1 + mi * nk];
+        }
+    }
+    // copy a[ni, nk] <- b[ni / 4, nk, 4]
+    static void avx_rev_ncopy_4(size_t ni, size_t nk, const double *b,
+                                double *__restrict__ a, size_t lda) {
+        for (size_t mi = ni >> 2 << 2; mi >= 4; mi -= 4) {
+            for (size_t mk = nk >> 2 << 2; mk >= 4; mk -= 4) {
+                __m256d x0, x1, x2, x3, r3, r33, r4, r34;
+                x0 = _mm256_loadu_pd(&b[(mk - 4) * 4 + (mi - 4) * nk]);
+                x1 = _mm256_loadu_pd(&b[(mk - 3) * 4 + (mi - 4) * nk]);
+                x2 = _mm256_loadu_pd(&b[(mk - 2) * 4 + (mi - 4) * nk]);
+                x3 = _mm256_loadu_pd(&b[(mk - 1) * 4 + (mi - 4) * nk]);
+                r3 = _mm256_shuffle_pd(x0, x1, 0x3);
+                r4 = _mm256_shuffle_pd(x0, x1, 0xc);
+                r33 = _mm256_shuffle_pd(x2, x3, 0x3);
+                r34 = _mm256_shuffle_pd(x2, x3, 0xc);
+                x0 = _mm256_permute2f128_pd(r34, r4, 0x2);
+                x1 = _mm256_permute2f128_pd(r33, r3, 0x2);
+                x2 = _mm256_permute2f128_pd(r33, r3, 0x13);
+                x3 = _mm256_permute2f128_pd(r34, r4, 0x13);
+                _mm256_storeu_pd(&a[mk - 4 + (mi - 4) * lda], x0);
+                _mm256_storeu_pd(&a[mk - 4 + (mi - 3) * lda], x1);
+                _mm256_storeu_pd(&a[mk - 4 + (mi - 2) * lda], x2);
+                _mm256_storeu_pd(&a[mk - 4 + (mi - 1) * lda], x3);
+            }
+            if (nk & 2) {
+                const size_t mk = nk >> 1 << 1;
+                __m128d x0, x1, x2, x3, x00, x10, x01, x11;
+                x0 = _mm_loadu_pd(&b[(mk - 2) * 4 + 0 + (mi - 4) * nk]);
+                x1 = _mm_loadu_pd(&b[(mk - 2) * 4 + 2 + (mi - 4) * nk]);
+                x2 = _mm_loadu_pd(&b[(mk - 1) * 4 + 0 + (mi - 4) * nk]);
+                x3 = _mm_loadu_pd(&b[(mk - 1) * 4 + 2 + (mi - 4) * nk]);
+                x00 = _mm_shuffle_pd(x0, x2, 0x0);
+                x10 = _mm_shuffle_pd(x0, x2, 0x3);
+                x01 = _mm_shuffle_pd(x1, x3, 0x0);
+                x11 = _mm_shuffle_pd(x1, x3, 0x3);
+                _mm_storeu_pd(&a[mk - 2 + (mi - 4) * lda], x00);
+                _mm_storeu_pd(&a[mk - 2 + (mi - 3) * lda], x10);
+                _mm_storeu_pd(&a[mk - 2 + (mi - 2) * lda], x01);
+                _mm_storeu_pd(&a[mk - 2 + (mi - 1) * lda], x11);
+            }
+            if (nk & 1) {
+                a[nk - 1 + (mi - 4) * lda] =
+                    b[(nk - 1) * 4 + 0 + (mi - 4) * nk];
+                a[nk - 1 + (mi - 3) * lda] =
+                    b[(nk - 1) * 4 + 1 + (mi - 4) * nk];
+                a[nk - 1 + (mi - 2) * lda] =
+                    b[(nk - 1) * 4 + 2 + (mi - 4) * nk];
+                a[nk - 1 + (mi - 1) * lda] =
+                    b[(nk - 1) * 4 + 3 + (mi - 4) * nk];
+            }
+        }
+        if (ni & 2) {
+            const size_t mi = ni >> 1 << 1;
+            for (size_t mk = nk >> 2 << 2; mk >= 4; mk -= 4) {
+                __m128d x0, x1, x2, x3, x00, x10, x01, x11;
+                x0 = _mm_loadu_pd(&b[(mk - 4) * 2 + (mi - 2) * nk]);
+                x1 = _mm_loadu_pd(&b[(mk - 3) * 2 + (mi - 2) * nk]);
+                x2 = _mm_loadu_pd(&b[(mk - 2) * 2 + (mi - 2) * nk]);
+                x3 = _mm_loadu_pd(&b[(mk - 1) * 2 + (mi - 2) * nk]);
+                x00 = _mm_shuffle_pd(x0, x1, 0x0);
+                x10 = _mm_shuffle_pd(x0, x1, 0x3);
+                x01 = _mm_shuffle_pd(x2, x3, 0x0);
+                x11 = _mm_shuffle_pd(x2, x3, 0x3);
+                _mm_storeu_pd(&a[mk - 4 + (mi - 2) * lda], x00);
+                _mm_storeu_pd(&a[mk - 2 + (mi - 2) * lda], x01);
+                _mm_storeu_pd(&a[mk - 4 + (mi - 1) * lda], x10);
+                _mm_storeu_pd(&a[mk - 2 + (mi - 1) * lda], x11);
+            }
+            if (nk & 2) {
+                const size_t mk = nk >> 1 << 1;
+                __m128d x0, x1, x00, x10;
+                x0 = _mm_loadu_pd(&b[(mk - 2) * 2 + (mi - 2) * nk]);
+                x1 = _mm_loadu_pd(&b[(mk - 1) * 2 + (mi - 2) * nk]);
+                x00 = _mm_shuffle_pd(x0, x1, 0x0);
+                x10 = _mm_shuffle_pd(x0, x1, 0x3);
+                _mm_storeu_pd(&a[mk - 2 + (mi - 2) * lda], x00);
+                _mm_storeu_pd(&a[mk - 2 + (mi - 1) * lda], x10);
+            }
+            if (nk & 1) {
+                a[nk - 1 + (mi - 2) * lda] =
+                    b[(nk - 1) * 2 + 0 + (mi - 2) * nk];
+                a[nk - 1 + (mi - 1) * lda] =
+                    b[(nk - 1) * 2 + 1 + (mi - 2) * nk];
+            }
+        }
+        if (ni & 1) {
+            const size_t mi = ni - 1;
+            for (size_t mk = nk >> 2 << 2; mk >= 4; mk -= 4) {
+                a[mk - 4 + mi * lda] = b[mk - 4 + mi * nk];
+                a[mk - 3 + mi * lda] = b[mk - 3 + mi * nk];
+                a[mk - 2 + mi * lda] = b[mk - 2 + mi * nk];
+                a[mk - 1 + mi * lda] = b[mk - 1 + mi * nk];
+            }
+            if (nk & 2) {
+                const size_t mk = nk >> 1 << 1;
+                a[mk - 2 + mi * lda] = b[mk - 2 + mi * nk];
+                a[mk - 1 + mi * lda] = b[mk - 1 + mi * nk];
+            }
+            if (nk & 1)
+                a[nk - 1 + mi * lda] = b[nk - 1 + mi * nk];
+        }
+    }
     template <size_t nk, size_t ni>
     static void avx_full_copy(uint8_t ta, size_t pk, size_t pi, const double *a,
                               size_t lda, double *__restrict__ b) {
@@ -613,17 +807,43 @@ struct SimdMatrixFunctions<
             }
         }
     }
+    template <size_t nk, size_t ni>
+    static void avx_rev_full_copy(uint8_t ta, size_t pk, size_t pi,
+                                  const double *a, double *__restrict__ b,
+                                  size_t ldb) {
+        // b[pk, pi, i / 4, k, 4]
+        for (size_t kk = 0; kk < pk; kk += nk) {
+            const size_t nnk = min(pk - kk, nk);
+            for (size_t ii = 0; ii < pi; ii += ni) {
+                const size_t nni = min(pi - ii, ni);
+                if (ta)
+                    avx_rev_ncopy_4(nni, nnk, &a[kk * pi + ii * nnk],
+                                    &b[kk + ii * ldb], ldb);
+                else
+                    avx_rev_tcopy_4(nni, nnk, &a[kk * pi + ii * nnk],
+                                    &b[ii + kk * ldb], ldb);
+            }
+        }
+    }
     template <uint8_t full_copy, size_t ni, size_t nj, size_t nk>
     static void avx_gemm(uint8_t ta, uint8_t tb, size_t m, size_t n, size_t k,
                          double alpha, const double *a, size_t lda,
                          const double *b, size_t ldb, double beta, double *c,
                          size_t ldc) {
         double *__restrict__ xa = nullptr, *__restrict__ xb = nullptr;
-        if (full_copy) {
-            xa = (double *)aligned_alloc(32, k * m * sizeof(double));
+        if (full_copy == 2) {
+            // assert((ta == 1 && tb == 0));
+            xa = (double *)a, xb = (double *)b;
+        } else if (full_copy == 3) { // alloc b
+            assert(ta == 1);
+            xa = (double *)a;
             xb = (double *)aligned_alloc(32, k * n * sizeof(double));
-            avx_full_copy<nk, ni>(ta, k, m, a, lda, xa);
             avx_full_copy<nk, ni>(!tb, k, n, b, ldb, xb);
+        } else if (full_copy == 4) { // alloc a
+            assert(tb == 0);
+            xa = (double *)aligned_alloc(32, k * m * sizeof(double));
+            xb = (double *)b;
+            avx_full_copy<nk, ni>(ta, k, m, a, lda, xa);
         } else {
             xa = (double *)aligned_alloc(32, min(k, nk) * min(m, ni) *
                                                  sizeof(double));
@@ -1208,8 +1428,14 @@ struct SimdMatrixFunctions<
                 }
             }
         }
-        free(xa);
-        free(xb);
+        if (full_copy == 1 || full_copy == 0) {
+            free(xa);
+            free(xb);
+        } else if (full_copy == 3) {
+            free(xb);
+        } else if (full_copy == 4) {
+            free(xa);
+        }
     }
 };
 

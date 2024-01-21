@@ -134,6 +134,7 @@ enum struct SeqTypes : uint16_t {
                       //!< ``SeqTypes::Simple`` for other steps.
     Simd = 8,
     FullCopy = 16,
+    Precopy = 512,
     SimdTasked = 12,
     Aligned32B = 32,
     Aligned64B = 64,
@@ -149,13 +150,14 @@ inline SeqTypes operator|(SeqTypes a, SeqTypes b) {
 }
 
 inline bool seq_type_is_trivial(SeqTypes x) noexcept {
-    return ((uint16_t)x & ~(uint16_t)(SeqTypes::Simd | SeqTypes::Aligned |
-                                      SeqTypes::FullCopy)) == 0;
+    return ((uint16_t)x &
+            ~(uint16_t)(SeqTypes::Simd | SeqTypes::Aligned |
+                        SeqTypes::FullCopy | SeqTypes::Precopy)) == 0;
 }
 
 inline SeqTypes seq_type_make_trivial(SeqTypes x) noexcept {
     return (SeqTypes)(x & (SeqTypes::Simd | SeqTypes::Aligned |
-                           SeqTypes::FullCopy));
+                           SeqTypes::FullCopy | SeqTypes::Precopy));
 }
 
 /**
@@ -288,6 +290,8 @@ struct Threading {
             ss << "Tasked";
         if (seq_type & SeqTypes::FullCopy)
             ss << "|FullCopy";
+        if (seq_type & SeqTypes::Precopy)
+            ss << "|Precopy";
         if (seq_type & SeqTypes::Aligned32B)
             ss << "|Aligned32B";
         if (seq_type & SeqTypes::Aligned64B)

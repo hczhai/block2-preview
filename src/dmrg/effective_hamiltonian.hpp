@@ -203,8 +203,16 @@ struct EffectiveHamiltonian<S, FL, MPS<S, FL>> {
         } else if (tf->opf->seq->mode & SeqTypes::Tasked) {
             cmat->data = vmat->data = (FL *)0;
             cmat->factor = 1.0;
+            if (tf->opf->seq->mode & SeqTypes::Precopy) {
+                tf->tensor_precopy(op->lopt);
+                tf->tensor_precopy(op->ropt);
+                tf->opf->seq->percopy_perform(true, 1);
+                tf->opf->seq->percopy_clear();
+            }
             tf->tensor_product_multiply(op->mat->data[0], op->lopt, op->ropt,
                                         cmat, vmat, opdq, false);
+            if (tf->opf->seq->mode & SeqTypes::Precopy)
+                tf->tensor_precopy(cmat);
         }
     }
     void post_precompute() const {
@@ -212,6 +220,13 @@ struct EffectiveHamiltonian<S, FL, MPS<S, FL>> {
             (tf->opf->seq->mode & SeqTypes::Tasked)) {
             tf->opf->seq->deallocate();
             tf->opf->seq->clear();
+            if (tf->opf->seq->mode & SeqTypes::Precopy) {
+                tf->opf->seq->percopy_clear();
+                tf->tensor_precopy(op->lopt);
+                tf->tensor_precopy(op->ropt);
+                tf->opf->seq->percopy_perform(false, 1);
+                tf->opf->seq->percopy_clear();
+            }
         }
     }
     shared_ptr<SparseMatrixGroup<S, FL>>

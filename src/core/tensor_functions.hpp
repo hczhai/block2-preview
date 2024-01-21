@@ -73,7 +73,7 @@ template <typename S, typename FL> struct TensorFunctions {
                 op(tf, i);
         } else {
             vector<shared_ptr<TensorFunctions>> tfs(1, tf);
-            vector<array<size_t, 4>> tf_sz(ntop + 1);
+            vector<array<size_t, 5>> tf_sz(ntop + 1);
             for (int i = 1; i < ntop; i++) {
                 tfs.push_back(this->copy());
                 tfs[i]->opf->seq->cumulative_nflop = 0;
@@ -87,6 +87,7 @@ template <typename S, typename FL> struct TensorFunctions {
             tf_sz[1][1] = opf->seq->batch[0]->c.size();
             tf_sz[1][2] = opf->seq->batch[1]->gp.size();
             tf_sz[1][3] = opf->seq->batch[1]->c.size();
+            tf_sz[1][4] = opf->seq->precopy_batch.size();
             bool has_acidxs = opf->seq->batch[0]->acidxs.size() != 0;
             for (int i = 1; i < ntop; i++) {
                 tf_sz[i + 1][0] =
@@ -97,6 +98,8 @@ template <typename S, typename FL> struct TensorFunctions {
                     tf_sz[i][2] + tfs[i]->opf->seq->batch[1]->gp.size();
                 tf_sz[i + 1][3] =
                     tf_sz[i][3] + tfs[i]->opf->seq->batch[1]->c.size();
+                tf_sz[i + 1][4] =
+                    tf_sz[i][4] + tfs[i]->opf->seq->precopy_batch.size();
                 has_acidxs = has_acidxs ||
                              tfs[i]->opf->seq->batch[0]->acidxs.size() != 0;
                 opf->seq->batch[0]->nflop += tfs[i]->opf->seq->batch[0]->nflop;
@@ -124,6 +127,20 @@ template <typename S, typename FL> struct TensorFunctions {
                             tf_sz[tid][2], tf_sz[tid][3],
                             tfs[tid]->opf->seq->batch[1]);
                     }
+                }
+            }
+            if (tf_sz[ntop][4] != 0) {
+                opf->seq->precopy_batch.reserve(tf_sz[ntop][4]);
+                opf->seq->precopy_batch.resize(tf_sz[ntop][4],
+                                               GMatrix<FL>(nullptr, 0, 0));
+#pragma omp parallel num_threads(ntop)
+                {
+                    int tid = threading->get_thread_id();
+                    if (tid != 0)
+                        memcpy(opf->seq->precopy_batch.data() + tf_sz[tid][4],
+                               tfs[tid]->opf->seq->precopy_batch.data(),
+                               sizeof(GMatrix<FL>) *
+                                   tfs[tid]->opf->seq->precopy_batch.size());
                 }
             }
         }
@@ -1490,6 +1507,26 @@ template <typename S, typename FL> struct TensorFunctions {
         for (auto &vpart : vparts)
             get<3>(vpart)->deallocate();
         return expectations;
+    }
+    virtual void
+    tensor_precopy(const shared_ptr<OperatorTensor<S, FL>> &xopt) const {
+        vector<shared_ptr<SparseMatrix<S, FL>>> mats(xopt->ops.size(), nullptr);
+        size_t nmats = 0;
+        for (const auto &mx : xopt->ops)
+            if (mx.second->alloc != nullptr) {
+                mats[nmats++] = mx.second;
+            }
+        mats.resize(nmats);
+        parallel_for(
+            nmats, [&mats](const shared_ptr<TensorFunctions> &tf, size_t im) {
+                for (int k = 0; k < mats[im]->info->n; k++)
+                    tf->opf->seq->precopy_batch.push_back((*mats[im])[k]);
+            });
+    }
+    virtual void
+    tensor_precopy(const shared_ptr<SparseMatrix<S, FL>> &xmat) const {
+        for (int k = 0; k < xmat->info->n; k++)
+            opf->seq->precopy_batch.push_back((*xmat)[k]);
     }
     // vmat = expr x cmat
     virtual void
