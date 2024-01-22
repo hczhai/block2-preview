@@ -234,6 +234,10 @@ single_xgemm(const CBLAS_LAYOUT Layout, const CBLAS_TRANSPOSE *TransA_Array,
         SimdMatrixFunctions<FL>::template avx_gemm<2, 512, 24, 256>(
             !(*trb == 'n' || *trb == 'N'), !(*tra == 'n' || *tra == 'N'), n, m,
             k, alpha, B, ldb, A, lda, beta, C, ldc);
+    else if (precopied == 5)
+        SimdMatrixFunctions<FL>::template avx_gemm_direct_ncopy<256, 64, 256>(
+            !(*trb == 'n' || *trb == 'N'), !(*tra == 'n' || *tra == 'N'), n, m,
+            k, alpha, B, ldb, A, lda, beta, C);
     else if (precopied == 3)
         SimdMatrixFunctions<FL>::template avx_gemm<3, 512, 24, 256>(
             !(*trb == 'n' || *trb == 'N'), !(*tra == 'n' || *tra == 'N'), n, m,
@@ -586,8 +590,8 @@ struct AdvancedGEMM<FL,
         if (ak <= ba) {
             GMatrix<FL> work((FL *)0 + batch[0]->work,
                              (conj_ket & 1) ? ket.m : ket.n, a.m);
-            AdvancedGEMM<FL>::multiply(batch[0], ket, conj_ket ^ 1, a, true, work,
-                                       1.0, 0.0);
+            AdvancedGEMM<FL>::multiply(batch[0], ket, conj_ket ^ 1, a, true,
+                                       work, 1.0, 0.0);
             AdvancedGEMM<FL>::multiply(batch[1], bra, conj_bra, work, true, c,
                                        scale, 1.0);
             batch[0]->acidxs.push_back(2);
@@ -1696,14 +1700,15 @@ template <typename FL> struct BatchGEMMSeq {
                                     i,
                                     batch[0]->a[k0] + (xta ? rcshift : lcshift),
                                     batch[0]->b[k0], batch[0]->c[k0] + wshift,
-                                    1.0, precopied);
+                                    1.0, precopied + 3);
                         else
                             for (MKL_INT k0 = k0z; k0 < k0z + batch[0]->gp[i];
                                  k0++)
                                 batch[0]->perform_single(
                                     i, batch[0]->a[k0],
                                     batch[0]->b[k0] + (xtb ? lcshift : rcshift),
-                                    batch[0]->c[k0] + wshift, 1.0, precopied);
+                                    batch[0]->c[k0] + wshift, 1.0,
+                                    precopied + 3);
                         if (!(batch[0]->acidxs[i] & 1))
                             for (MKL_INT k1 = k1z; k1 < k1z + batch[1]->gp[i];
                                  k1++)
@@ -1711,14 +1716,14 @@ template <typename FL> struct BatchGEMMSeq {
                                     i, batch[1]->a[k1],
                                     batch[1]->b[k1] + wshift,
                                     batch[1]->c[k1] + t_vshift, scale,
-                                    precopied ? precopied + 2 : 0);
+                                    precopied ? precopied + 2 * 0 : 0);
                         else
                             for (MKL_INT k1 = k1z; k1 < k1z + batch[1]->gp[i];
                                  k1++)
                                 batch[1]->perform_single(
                                     i, batch[1]->a[k1] + wshift,
                                     batch[1]->b[k1], batch[1]->c[k1] + t_vshift,
-                                    scale, precopied ? precopied + 1 : 0);
+                                    scale, precopied ? precopied + 1 * 0 : 0);
                     }
                 }
 #pragma omp single

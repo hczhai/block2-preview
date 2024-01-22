@@ -56,6 +56,14 @@ struct SimdMatrixFunctions<
                          complex<double> beta, complex<double> *c, size_t ldc) {
         throw runtime_error("!");
     }
+    template <size_t ni, size_t nj, size_t nk>
+    static void
+    avx_gemm_direct_ncopy(uint8_t ta, uint8_t tb, size_t m, size_t n, size_t k,
+                          complex<double> alpha, const complex<double> *a,
+                          size_t lda, const complex<double> *b, size_t ldb,
+                          complex<double> beta, complex<double> *c) {
+        throw runtime_error("!");
+    }
 };
 
 template <typename FL>
@@ -822,6 +830,618 @@ struct SimdMatrixFunctions<
                 else
                     avx_rev_tcopy_4(nni, nnk, &a[kk * pi + ii * nnk],
                                     &b[ii + kk * ldb], ldb);
+            }
+        }
+    }
+    template <size_t ni, size_t nj, size_t nk>
+    static void
+    avx_gemm_direct_ncopy(uint8_t ta, uint8_t tb, size_t m, size_t n, size_t k,
+                          double alpha, const double *a, size_t lda,
+                          const double *b, size_t ldb, double beta, double *c) {
+        assert(ni <= nk && nk % ni == 0);
+        for (size_t kk = 0; kk < k; kk += nk) {
+            const size_t nnk = min(k - kk, nk);
+            for (size_t ii = 0; ii < m; ii += ni) {
+                const size_t nni = min(m - ii, ni);
+                const double *__restrict__ pa = &a[kk * m + ii * nnk];
+                for (size_t jj = 0; jj < n; jj += nj) {
+                    const size_t nnj = min(n - jj, nj);
+                    const double *__restrict__ pb = &b[kk * n + jj * nnk];
+                    const size_t kk2 = ii / nk * nk, xk2 = ii - kk2,
+                                 nnk2 = min(m - kk2, nk);
+                    __m256d x0, x1, x2, y0, z0, z1, z2, z3, z4, z5, z6, z7, z8,
+                        z9, z10, z11;
+                    size_t xnnj = nnj >> 2 << 2;
+                    if (nnj >= 4) {
+                        double *__restrict__ pc =
+                            &c[kk2 * n + jj * nnk2 + xk2 * 4];
+                        size_t xnni = nni / 12 * 12;
+                        for (size_t xi = 0; xi < xnni; xi += 12)
+                            for (size_t xj = 0; xj < xnnj; xj += 4) {
+                                const double *px0 = &pa[xi * nnk];
+                                const double *px1 = &pa[(xi + 4) * nnk];
+                                const double *px2 = &pa[(xi + 8) * nnk];
+                                const double *py = &pb[xj * nnk];
+                                double *pz = &pc[xi * 4 + xj * nnk2];
+                                z0 = _mm256_setzero_pd();
+                                z1 = _mm256_setzero_pd();
+                                z2 = _mm256_setzero_pd();
+                                z3 = _mm256_setzero_pd();
+                                z4 = _mm256_setzero_pd();
+                                z5 = _mm256_setzero_pd();
+                                z6 = _mm256_setzero_pd();
+                                z7 = _mm256_setzero_pd();
+                                z8 = _mm256_setzero_pd();
+                                z9 = _mm256_setzero_pd();
+                                z10 = _mm256_setzero_pd();
+                                z11 = _mm256_setzero_pd();
+                                for (size_t xk = 0; xk < nnk; xk++) {
+                                    x0 = _mm256_loadu_pd(px0);
+                                    x1 = _mm256_loadu_pd(px1);
+                                    x2 = _mm256_loadu_pd(px2);
+                                    y0 = _mm256_broadcast_sd(&py[0]);
+                                    z0 = _mm256_fmadd_pd(x0, y0, z0);
+                                    z1 = _mm256_fmadd_pd(x1, y0, z1);
+                                    z2 = _mm256_fmadd_pd(x2, y0, z2);
+                                    y0 = _mm256_broadcast_sd(&py[1]);
+                                    z3 = _mm256_fmadd_pd(x0, y0, z3);
+                                    z4 = _mm256_fmadd_pd(x1, y0, z4);
+                                    z5 = _mm256_fmadd_pd(x2, y0, z5);
+                                    y0 = _mm256_broadcast_sd(&py[2]);
+                                    z6 = _mm256_fmadd_pd(x0, y0, z6);
+                                    z7 = _mm256_fmadd_pd(x1, y0, z7);
+                                    z8 = _mm256_fmadd_pd(x2, y0, z8);
+                                    y0 = _mm256_broadcast_sd(&py[3]);
+                                    z9 = _mm256_fmadd_pd(x0, y0, z9);
+                                    z10 = _mm256_fmadd_pd(x1, y0, z10);
+                                    z11 = _mm256_fmadd_pd(x2, y0, z11);
+                                    px0 += 4, px1 += 4, px2 += 4, py += 4;
+                                    _mm_prefetch(&px0[64], _MM_HINT_T0);
+                                    _mm_prefetch(&py[64], _MM_HINT_T0);
+                                }
+                                if (alpha != 1.0) {
+                                    y0 = _mm256_broadcast_sd(&alpha);
+                                    z0 *= y0, z1 *= y0, z2 *= y0;
+                                    z3 *= y0, z4 *= y0, z5 *= y0;
+                                    z6 *= y0, z7 *= y0, z8 *= y0;
+                                    z9 *= y0, z10 *= y0, z11 *= y0;
+                                }
+                                x0 = _mm256_shuffle_pd(z0, z3, 0x3);
+                                x1 = _mm256_shuffle_pd(z0, z3, 0xc);
+                                x2 = _mm256_shuffle_pd(z6, z9, 0x3);
+                                y0 = _mm256_shuffle_pd(z6, z9, 0xc);
+                                z0 = _mm256_permute2f128_pd(y0, x1, 0x2);
+                                z3 = _mm256_permute2f128_pd(x2, x0, 0x2);
+                                z6 = _mm256_permute2f128_pd(x2, x0, 0x13);
+                                z9 = _mm256_permute2f128_pd(y0, x1, 0x13);
+                                x0 = _mm256_shuffle_pd(z1, z4, 0x3);
+                                x1 = _mm256_shuffle_pd(z1, z4, 0xc);
+                                x2 = _mm256_shuffle_pd(z7, z10, 0x3);
+                                y0 = _mm256_shuffle_pd(z7, z10, 0xc);
+                                z1 = _mm256_permute2f128_pd(y0, x1, 0x2);
+                                z4 = _mm256_permute2f128_pd(x2, x0, 0x2);
+                                z7 = _mm256_permute2f128_pd(x2, x0, 0x13);
+                                z10 = _mm256_permute2f128_pd(y0, x1, 0x13);
+                                x0 = _mm256_shuffle_pd(z2, z5, 0x3);
+                                x1 = _mm256_shuffle_pd(z2, z5, 0xc);
+                                x2 = _mm256_shuffle_pd(z8, z11, 0x3);
+                                y0 = _mm256_shuffle_pd(z8, z11, 0xc);
+                                z2 = _mm256_permute2f128_pd(y0, x1, 0x2);
+                                z5 = _mm256_permute2f128_pd(x2, x0, 0x2);
+                                z8 = _mm256_permute2f128_pd(x2, x0, 0x13);
+                                z11 = _mm256_permute2f128_pd(y0, x1, 0x13);
+                                if (kk != 0) {
+                                    z0 += _mm256_loadu_pd(&pz[0 * 4]);
+                                    z1 += _mm256_loadu_pd(&pz[4 * 4]);
+                                    z2 += _mm256_loadu_pd(&pz[8 * 4]);
+                                    z3 += _mm256_loadu_pd(&pz[1 * 4]);
+                                    z4 += _mm256_loadu_pd(&pz[5 * 4]);
+                                    z5 += _mm256_loadu_pd(&pz[9 * 4]);
+                                    z6 += _mm256_loadu_pd(&pz[2 * 4]);
+                                    z7 += _mm256_loadu_pd(&pz[6 * 4]);
+                                    z8 += _mm256_loadu_pd(&pz[10 * 4]);
+                                    z9 += _mm256_loadu_pd(&pz[3 * 4]);
+                                    z10 += _mm256_loadu_pd(&pz[7 * 4]);
+                                    z11 += _mm256_loadu_pd(&pz[11 * 4]);
+                                } else if (beta != 0.0) {
+                                    y0 = _mm256_broadcast_sd(&beta);
+                                    z0 += y0 * _mm256_loadu_pd(&pz[0 * 4]);
+                                    z1 += y0 * _mm256_loadu_pd(&pz[4 * 4]);
+                                    z2 += y0 * _mm256_loadu_pd(&pz[8 * 4]);
+                                    z3 += y0 * _mm256_loadu_pd(&pz[1 * 4]);
+                                    z4 += y0 * _mm256_loadu_pd(&pz[5 * 4]);
+                                    z5 += y0 * _mm256_loadu_pd(&pz[9 * 4]);
+                                    z6 += y0 * _mm256_loadu_pd(&pz[2 * 4]);
+                                    z7 += y0 * _mm256_loadu_pd(&pz[6 * 4]);
+                                    z8 += y0 * _mm256_loadu_pd(&pz[10 * 4]);
+                                    z9 += y0 * _mm256_loadu_pd(&pz[3 * 4]);
+                                    z10 += y0 * _mm256_loadu_pd(&pz[7 * 4]);
+                                    z11 += y0 * _mm256_loadu_pd(&pz[11 * 4]);
+                                }
+                                _mm256_storeu_pd(&pz[0 * 4], z0);
+                                _mm256_storeu_pd(&pz[4 * 4], z1);
+                                _mm256_storeu_pd(&pz[8 * 4], z2);
+                                _mm256_storeu_pd(&pz[1 * 4], z3);
+                                _mm256_storeu_pd(&pz[5 * 4], z4);
+                                _mm256_storeu_pd(&pz[9 * 4], z5);
+                                _mm256_storeu_pd(&pz[2 * 4], z6);
+                                _mm256_storeu_pd(&pz[6 * 4], z7);
+                                _mm256_storeu_pd(&pz[10 * 4], z8);
+                                _mm256_storeu_pd(&pz[3 * 4], z9);
+                                _mm256_storeu_pd(&pz[7 * 4], z10);
+                                _mm256_storeu_pd(&pz[11 * 4], z11);
+                            }
+                        if ((nni - xnni) & 8) {
+                            for (size_t xj = 0; xj < xnnj; xj += 4) {
+                                const double *px0 = &pa[xnni * nnk];
+                                const double *px1 = &pa[(xnni + 4) * nnk];
+                                const double *py = &pb[xj * nnk];
+                                double *pz = &pc[xnni * 4 + xj * nnk2];
+                                z0 = _mm256_setzero_pd();
+                                z1 = _mm256_setzero_pd();
+                                z3 = _mm256_setzero_pd();
+                                z4 = _mm256_setzero_pd();
+                                z6 = _mm256_setzero_pd();
+                                z7 = _mm256_setzero_pd();
+                                z9 = _mm256_setzero_pd();
+                                z10 = _mm256_setzero_pd();
+                                for (size_t xk = 0; xk < nnk; xk++) {
+                                    x0 = _mm256_loadu_pd(px0);
+                                    x1 = _mm256_loadu_pd(px1);
+                                    z2 = _mm256_broadcast_sd(&py[0]);
+                                    z0 = _mm256_fmadd_pd(x0, z2, z0);
+                                    z1 = _mm256_fmadd_pd(x1, z2, z1);
+                                    z5 = _mm256_broadcast_sd(&py[1]);
+                                    z3 = _mm256_fmadd_pd(x0, z5, z3);
+                                    z4 = _mm256_fmadd_pd(x1, z5, z4);
+                                    z8 = _mm256_broadcast_sd(&py[2]);
+                                    z6 = _mm256_fmadd_pd(x0, z8, z6);
+                                    z7 = _mm256_fmadd_pd(x1, z8, z7);
+                                    z11 = _mm256_broadcast_sd(&py[3]);
+                                    z9 = _mm256_fmadd_pd(x0, z11, z9);
+                                    z10 = _mm256_fmadd_pd(x1, z11, z10);
+                                    px0 += 4, px1 += 4, py += 4;
+                                    _mm_prefetch(&px0[64], _MM_HINT_T0);
+                                    _mm_prefetch(&py[64], _MM_HINT_T0);
+                                }
+                                if (alpha != 1.0) {
+                                    y0 = _mm256_broadcast_sd(&alpha);
+                                    z0 *= y0, z1 *= y0;
+                                    z3 *= y0, z4 *= y0;
+                                    z6 *= y0, z7 *= y0;
+                                    z9 *= y0, z10 *= y0;
+                                }
+                                x0 = _mm256_shuffle_pd(z0, z3, 0x3);
+                                x1 = _mm256_shuffle_pd(z0, z3, 0xc);
+                                x2 = _mm256_shuffle_pd(z6, z9, 0x3);
+                                y0 = _mm256_shuffle_pd(z6, z9, 0xc);
+                                z0 = _mm256_permute2f128_pd(y0, x1, 0x2);
+                                z3 = _mm256_permute2f128_pd(x2, x0, 0x2);
+                                z6 = _mm256_permute2f128_pd(x2, x0, 0x13);
+                                z9 = _mm256_permute2f128_pd(y0, x1, 0x13);
+                                x0 = _mm256_shuffle_pd(z1, z4, 0x3);
+                                x1 = _mm256_shuffle_pd(z1, z4, 0xc);
+                                x2 = _mm256_shuffle_pd(z7, z10, 0x3);
+                                y0 = _mm256_shuffle_pd(z7, z10, 0xc);
+                                z1 = _mm256_permute2f128_pd(y0, x1, 0x2);
+                                z4 = _mm256_permute2f128_pd(x2, x0, 0x2);
+                                z7 = _mm256_permute2f128_pd(x2, x0, 0x13);
+                                z10 = _mm256_permute2f128_pd(y0, x1, 0x13);
+                                if (kk != 0) {
+                                    z0 += _mm256_loadu_pd(&pz[0 * 4]);
+                                    z1 += _mm256_loadu_pd(&pz[4 * 4]);
+                                    z3 += _mm256_loadu_pd(&pz[1 * 4]);
+                                    z4 += _mm256_loadu_pd(&pz[5 * 4]);
+                                    z6 += _mm256_loadu_pd(&pz[2 * 4]);
+                                    z7 += _mm256_loadu_pd(&pz[6 * 4]);
+                                    z9 += _mm256_loadu_pd(&pz[3 * 4]);
+                                    z10 += _mm256_loadu_pd(&pz[7 * 4]);
+                                } else if (beta != 0.0) {
+                                    y0 = _mm256_broadcast_sd(&beta);
+                                    z0 += y0 * _mm256_loadu_pd(&pz[0 * 4]);
+                                    z1 += y0 * _mm256_loadu_pd(&pz[4 * 4]);
+                                    z3 += y0 * _mm256_loadu_pd(&pz[1 * 4]);
+                                    z4 += y0 * _mm256_loadu_pd(&pz[5 * 4]);
+                                    z6 += y0 * _mm256_loadu_pd(&pz[2 * 4]);
+                                    z7 += y0 * _mm256_loadu_pd(&pz[6 * 4]);
+                                    z9 += y0 * _mm256_loadu_pd(&pz[3 * 4]);
+                                    z10 += y0 * _mm256_loadu_pd(&pz[7 * 4]);
+                                }
+                                _mm256_storeu_pd(&pz[0 * 4], z0);
+                                _mm256_storeu_pd(&pz[4 * 4], z1);
+                                _mm256_storeu_pd(&pz[1 * 4], z3);
+                                _mm256_storeu_pd(&pz[5 * 4], z4);
+                                _mm256_storeu_pd(&pz[2 * 4], z6);
+                                _mm256_storeu_pd(&pz[6 * 4], z7);
+                                _mm256_storeu_pd(&pz[3 * 4], z9);
+                                _mm256_storeu_pd(&pz[7 * 4], z10);
+                            }
+                            xnni += 8;
+                        }
+                        if ((nni - xnni) & 4) {
+                            for (size_t xj = 0; xj < xnnj; xj += 4) {
+                                const double *px0 = &pa[xnni * nnk];
+                                const double *py = &pb[xj * nnk];
+                                double *pz = &pc[xnni * 4 + xj * nnk2];
+                                z0 = _mm256_setzero_pd();
+                                z3 = _mm256_setzero_pd();
+                                z6 = _mm256_setzero_pd();
+                                z9 = _mm256_setzero_pd();
+                                for (size_t xk = 0; xk < nnk; xk++) {
+                                    x0 = _mm256_loadu_pd(px0);
+                                    z2 = _mm256_broadcast_sd(&py[0]);
+                                    z0 = _mm256_fmadd_pd(x0, z2, z0);
+                                    z5 = _mm256_broadcast_sd(&py[1]);
+                                    z3 = _mm256_fmadd_pd(x0, z5, z3);
+                                    z8 = _mm256_broadcast_sd(&py[2]);
+                                    z6 = _mm256_fmadd_pd(x0, z8, z6);
+                                    z11 = _mm256_broadcast_sd(&py[3]);
+                                    z9 = _mm256_fmadd_pd(x0, z11, z9);
+                                    px0 += 4, py += 4;
+                                    _mm_prefetch(&px0[64], _MM_HINT_T0);
+                                    _mm_prefetch(&py[64], _MM_HINT_T0);
+                                }
+                                if (alpha != 1.0) {
+                                    y0 = _mm256_broadcast_sd(&alpha);
+                                    z0 *= y0, z3 *= y0, z6 *= y0, z9 *= y0;
+                                }
+                                x0 = _mm256_shuffle_pd(z0, z3, 0x3);
+                                x1 = _mm256_shuffle_pd(z0, z3, 0xc);
+                                x2 = _mm256_shuffle_pd(z6, z9, 0x3);
+                                y0 = _mm256_shuffle_pd(z6, z9, 0xc);
+                                z0 = _mm256_permute2f128_pd(y0, x1, 0x2);
+                                z3 = _mm256_permute2f128_pd(x2, x0, 0x2);
+                                z6 = _mm256_permute2f128_pd(x2, x0, 0x13);
+                                z9 = _mm256_permute2f128_pd(y0, x1, 0x13);
+                                if (kk != 0) {
+                                    z0 += _mm256_loadu_pd(&pz[0 * 4]);
+                                    z3 += _mm256_loadu_pd(&pz[1 * 4]);
+                                    z6 += _mm256_loadu_pd(&pz[2 * 4]);
+                                    z9 += _mm256_loadu_pd(&pz[3 * 4]);
+                                } else if (beta != 0.0) {
+                                    y0 = _mm256_broadcast_sd(&beta);
+                                    z0 += y0 * _mm256_loadu_pd(&pz[0 * 4]);
+                                    z3 += y0 * _mm256_loadu_pd(&pz[1 * 4]);
+                                    z6 += y0 * _mm256_loadu_pd(&pz[2 * 4]);
+                                    z9 += y0 * _mm256_loadu_pd(&pz[3 * 4]);
+                                }
+                                _mm256_storeu_pd(&pz[0 * 4], z0);
+                                _mm256_storeu_pd(&pz[1 * 4], z3);
+                                _mm256_storeu_pd(&pz[2 * 4], z6);
+                                _mm256_storeu_pd(&pz[3 * 4], z9);
+                            }
+                            xnni += 4;
+                        }
+                        if ((nni - xnni) & 2) {
+                            __m128d w0, w1, w2, w3, wx0, wx1, wx2, wx3;
+                            for (size_t xj = 0; xj < xnnj; xj += 4) {
+                                const double *px0 = &pa[xnni * nnk];
+                                const double *py = &pb[xj * nnk];
+                                double *pz = &pc[xnni * 4 + xj * nnk2];
+                                w0 = _mm_setzero_pd();
+                                w1 = _mm_setzero_pd();
+                                w2 = _mm_setzero_pd();
+                                w3 = _mm_setzero_pd();
+                                for (size_t xk = 0; xk < nnk; xk++) {
+                                    wx0 = _mm_loadu_pd(px0);
+                                    w0 = _mm_fmadd_pd(wx0, _mm_set1_pd(py[0]),
+                                                      w0);
+                                    w1 = _mm_fmadd_pd(wx0, _mm_set1_pd(py[1]),
+                                                      w1);
+                                    w2 = _mm_fmadd_pd(wx0, _mm_set1_pd(py[2]),
+                                                      w2);
+                                    w3 = _mm_fmadd_pd(wx0, _mm_set1_pd(py[3]),
+                                                      w3);
+                                    px0 += 2, py += 4;
+                                    _mm_prefetch(&px0[64], _MM_HINT_T0);
+                                    _mm_prefetch(&py[64], _MM_HINT_T0);
+                                }
+                                if (alpha != 1.0) {
+                                    wx0 = _mm_set1_pd(alpha);
+                                    w0 *= wx0, w1 *= wx0, w2 *= wx0, w3 *= wx0;
+                                }
+                                wx0 = _mm_shuffle_pd(w0, w1, 0x0);
+                                wx2 = _mm_shuffle_pd(w0, w1, 0x3);
+                                wx1 = _mm_shuffle_pd(w2, w3, 0x0);
+                                wx3 = _mm_shuffle_pd(w2, w3, 0x3);
+                                w0 = wx0, w1 = wx1;
+                                w2 = wx2, w3 = wx3;
+                                if (kk != 0) {
+                                    w0 += _mm_loadu_pd(&pz[0 + 0 * 4]);
+                                    w1 += _mm_loadu_pd(&pz[2 + 0 * 4]);
+                                    w2 += _mm_loadu_pd(&pz[0 + 1 * 4]);
+                                    w3 += _mm_loadu_pd(&pz[2 + 1 * 4]);
+                                } else if (beta != 0.0) {
+                                    wx0 = _mm_set1_pd(beta);
+                                    w0 += wx0 * _mm_loadu_pd(&pz[0 + 0 * 4]);
+                                    w1 += wx0 * _mm_loadu_pd(&pz[2 + 0 * 4]);
+                                    w2 += wx0 * _mm_loadu_pd(&pz[0 + 1 * 4]);
+                                    w3 += wx0 * _mm_loadu_pd(&pz[2 + 1 * 4]);
+                                }
+                                _mm_storeu_pd(&pz[0 + 0 * 4], w0);
+                                _mm_storeu_pd(&pz[2 + 0 * 4], w1);
+                                _mm_storeu_pd(&pz[0 + 1 * 4], w2);
+                                _mm_storeu_pd(&pz[2 + 1 * 4], w3);
+                            }
+                            xnni += 2;
+                        }
+                        if ((nni - xnni) & 1) {
+                            for (size_t xj = 0; xj < xnnj; xj += 4) {
+                                const double *px0 = &pa[xnni * nnk];
+                                const double *py = &pb[xj * nnk];
+                                double *pz = &pc[xnni * 4 + xj * nnk2];
+                                z0 = _mm256_setzero_pd();
+                                for (size_t xk = 0; xk < nnk; xk++) {
+                                    x0 = _mm256_broadcast_sd(px0);
+                                    z0 = _mm256_fmadd_pd(
+                                        x0, _mm256_loadu_pd(py), z0);
+                                    px0++, py += 4;
+                                    _mm_prefetch(&px0[64], _MM_HINT_T0);
+                                    _mm_prefetch(&py[64], _MM_HINT_T0);
+                                }
+                                if (alpha != 1.0)
+                                    z0 *= _mm256_broadcast_sd(&alpha);
+                                if (kk != 0)
+                                    _mm256_storeu_pd(pz,
+                                                     z0 + _mm256_loadu_pd(pz));
+                                else if (beta != 0.0)
+                                    _mm256_storeu_pd(
+                                        pz, _mm256_fmadd_pd(
+                                                _mm256_broadcast_sd(&beta),
+                                                _mm256_loadu_pd(pz), z0));
+                                else
+                                    _mm256_storeu_pd(pz, z0);
+                            }
+                        }
+                    }
+                    if ((nnj - xnnj) & 2) {
+                        double *__restrict__ pc =
+                            &c[kk2 * n + jj * nnk2 + xk2 * 2];
+                        size_t xnni = nni >> 3 << 3;
+                        for (size_t xi = 0; xi < xnni; xi += 8) {
+                            const double *px0 = &pa[xi * nnk];
+                            const double *px1 = &pa[(xi + 4) * nnk];
+                            const double *py = &pb[xnnj * nnk];
+                            double *pz = &pc[xi * 2 + xnnj * nnk2];
+                            z0 = _mm256_setzero_pd();
+                            z1 = _mm256_setzero_pd();
+                            z3 = _mm256_setzero_pd();
+                            z4 = _mm256_setzero_pd();
+                            for (size_t xk = 0; xk < nnk; xk++) {
+                                x0 = _mm256_loadu_pd(px0);
+                                x1 = _mm256_loadu_pd(px1);
+                                z2 = _mm256_broadcast_sd(&py[0]);
+                                z0 = _mm256_fmadd_pd(x0, z2, z0);
+                                z1 = _mm256_fmadd_pd(x1, z2, z1);
+                                z5 = _mm256_broadcast_sd(&py[1]);
+                                z3 = _mm256_fmadd_pd(x0, z5, z3);
+                                z4 = _mm256_fmadd_pd(x1, z5, z4);
+                                px0 += 4, px1 += 4, py += 2;
+                                _mm_prefetch(&px0[64], _MM_HINT_T0);
+                                _mm_prefetch(&py[64], _MM_HINT_T0);
+                            }
+                            if (alpha != 1.0) {
+                                y0 = _mm256_broadcast_sd(&alpha);
+                                z0 *= y0, z1 *= y0, z3 *= y0, z4 *= y0;
+                            }
+                            x0 = _mm256_permute2f128_pd(z0, z3, 0x20);
+                            x1 = _mm256_permute2f128_pd(z0, z3, 0x31);
+                            z0 = _mm256_permute4x64_pd(x0, 0xd8);
+                            z3 = _mm256_permute4x64_pd(x1, 0xd8);
+                            x0 = _mm256_permute2f128_pd(z1, z4, 0x20);
+                            x1 = _mm256_permute2f128_pd(z1, z4, 0x31);
+                            z1 = _mm256_permute4x64_pd(x0, 0xd8);
+                            z4 = _mm256_permute4x64_pd(x1, 0xd8);
+                            if (kk != 0) {
+                                z0 += _mm256_loadu_pd(&pz[0 * 2]);
+                                z1 += _mm256_loadu_pd(&pz[4 * 2]);
+                                z3 += _mm256_loadu_pd(&pz[2 * 2]);
+                                z4 += _mm256_loadu_pd(&pz[6 * 2]);
+                            } else if (beta != 0.0) {
+                                y0 = _mm256_broadcast_sd(&beta);
+                                z0 += y0 * _mm256_loadu_pd(&pz[0 * 2]);
+                                z1 += y0 * _mm256_loadu_pd(&pz[4 * 2]);
+                                z3 += y0 * _mm256_loadu_pd(&pz[2 * 2]);
+                                z4 += y0 * _mm256_loadu_pd(&pz[6 * 2]);
+                            }
+                            _mm256_storeu_pd(&pz[0 * 2], z0);
+                            _mm256_storeu_pd(&pz[4 * 2], z1);
+                            _mm256_storeu_pd(&pz[2 * 2], z3);
+                            _mm256_storeu_pd(&pz[6 * 2], z4);
+                        }
+                        if ((nni - xnni) & 4) {
+                            const double *px0 = &pa[xnni * nnk];
+                            const double *py = &pb[xnnj * nnk];
+                            double *pz = &pc[xnni * 2 + xnnj * nnk2];
+                            z0 = _mm256_setzero_pd();
+                            z3 = _mm256_setzero_pd();
+                            for (size_t xk = 0; xk < nnk; xk++) {
+                                x0 = _mm256_loadu_pd(px0);
+                                z2 = _mm256_broadcast_sd(&py[0]);
+                                z0 = _mm256_fmadd_pd(x0, z2, z0);
+                                z5 = _mm256_broadcast_sd(&py[1]);
+                                z3 = _mm256_fmadd_pd(x0, z5, z3);
+                                px0 += 4, py += 2;
+                                _mm_prefetch(&px0[64], _MM_HINT_T0);
+                                _mm_prefetch(&py[64], _MM_HINT_T0);
+                            }
+                            if (alpha != 1.0) {
+                                y0 = _mm256_broadcast_sd(&alpha);
+                                z0 *= y0, z3 *= y0;
+                            }
+                            x0 = _mm256_permute2f128_pd(z0, z3, 0x20);
+                            x1 = _mm256_permute2f128_pd(z0, z3, 0x31);
+                            z0 = _mm256_permute4x64_pd(x0, 0xd8);
+                            z3 = _mm256_permute4x64_pd(x1, 0xd8);
+                            if (kk != 0) {
+                                z0 += _mm256_loadu_pd(&pz[0 * 2]);
+                                z3 += _mm256_loadu_pd(&pz[2 * 2]);
+                            } else if (beta != 0.0) {
+                                y0 = _mm256_broadcast_sd(&beta);
+                                z0 += y0 * _mm256_loadu_pd(&pz[0 * 2]);
+                                z3 += y0 * _mm256_loadu_pd(&pz[2 * 2]);
+                            }
+                            _mm256_storeu_pd(&pz[0 * 2], z0);
+                            _mm256_storeu_pd(&pz[2 * 2], z3);
+                            xnni += 4;
+                        }
+                        if ((nni - xnni) & 2) {
+                            __m128d w0, w1, w2, w3, wx0;
+                            const double *px0 = &pa[xnni * nnk];
+                            const double *py = &pb[xnnj * nnk];
+                            double *pz = &pc[xnni * 2 + xnnj * nnk2];
+                            w0 = _mm_setzero_pd();
+                            w1 = _mm_setzero_pd();
+                            for (size_t xk = 0; xk < nnk; xk++) {
+                                wx0 = _mm_loadu_pd(px0);
+                                w0 = _mm_fmadd_pd(wx0, _mm_set1_pd(py[0]), w0);
+                                w1 = _mm_fmadd_pd(wx0, _mm_set1_pd(py[1]), w1);
+                                px0 += 2, py += 2;
+                                _mm_prefetch(&px0[64], _MM_HINT_T0);
+                                _mm_prefetch(&py[64], _MM_HINT_T0);
+                            }
+                            if (alpha != 1.0) {
+                                wx0 = _mm_set1_pd(alpha);
+                                w0 *= wx0, w1 *= wx0;
+                            }
+                            w2 = _mm_shuffle_pd(w0, w1, 0x0);
+                            w3 = _mm_shuffle_pd(w0, w1, 0x3);
+                            w0 = w2, w1 = w3;
+                            if (kk != 0) {
+                                w0 += _mm_loadu_pd(&pz[0 * 2]);
+                                w1 += _mm_loadu_pd(&pz[1 * 2]);
+                            } else if (beta != 0.0) {
+                                wx0 = _mm_set1_pd(beta);
+                                w0 += wx0 * _mm_loadu_pd(&pz[0 * 2]);
+                                w1 += wx0 * _mm_loadu_pd(&pz[1 * 2]);
+                            }
+                            _mm_storeu_pd(&pz[0 * 2], w0);
+                            _mm_storeu_pd(&pz[1 * 2], w1);
+                            xnni += 2;
+                        }
+                        if ((nni - xnni) & 1) {
+                            __m128d w0, w1;
+                            const double *px0 = &pa[xnni * nnk];
+                            const double *py = &pb[xnnj * nnk];
+                            double *pz = &pc[xnni * 2 + xnnj * nnk2];
+                            w0 = _mm_setzero_pd();
+                            for (size_t xk = 0; xk < nnk; xk++) {
+                                w1 = _mm_set1_pd(px0[xk]);
+                                w0 = _mm_fmadd_pd(w1, _mm_loadu_pd(py), w0);
+                                py += 2;
+                                _mm_prefetch(&py[64], _MM_HINT_T0);
+                            }
+                            if (alpha != 1.0)
+                                w0 *= _mm_set1_pd(alpha);
+                            if (kk != 0) {
+                                pz[0] += ((double *)(&w0))[0];
+                                pz[1] += ((double *)(&w0))[1];
+                            } else if (beta != 0.0) {
+                                pz[0] = beta * pz[0] + ((double *)(&w0))[0];
+                                pz[1] = beta * pz[1] + ((double *)(&w0))[1];
+                            } else {
+                                pz[0] = ((double *)(&w0))[0];
+                                pz[1] = ((double *)(&w0))[1];
+                            }
+                        }
+                        xnnj += 2;
+                    }
+                    if ((nnj - xnnj) & 1) {
+                        double *__restrict__ pc =
+                            &c[kk2 * n + jj * nnk2 + xk2 * 1];
+                        size_t xnni = nni >> 3 << 3;
+                        for (size_t xi = 0; xi < xnni; xi += 8) {
+                            const double *px0 = &pa[xi * nnk];
+                            const double *px1 = &pa[(xi + 4) * nnk];
+                            const double *py = &pb[xnnj * nnk];
+                            double *pz = &pc[xi * 1 + xnnj * nnk2];
+                            z0 = _mm256_setzero_pd();
+                            z1 = _mm256_setzero_pd();
+                            for (size_t xk = 0; xk < nnk; xk++) {
+                                x0 = _mm256_loadu_pd(px0);
+                                x1 = _mm256_loadu_pd(px1);
+                                z2 = _mm256_broadcast_sd(&py[xk]);
+                                z0 = _mm256_fmadd_pd(x0, z2, z0);
+                                z1 = _mm256_fmadd_pd(x1, z2, z1);
+                                px0 += 4, px1 += 4;
+                                _mm_prefetch(&px0[64], _MM_HINT_T0);
+                            }
+                            if (alpha != 1.0) {
+                                y0 = _mm256_broadcast_sd(&alpha);
+                                z0 *= y0, z1 *= y0;
+                            }
+                            if (kk != 0) {
+                                z0 += _mm256_loadu_pd(&pz[0]);
+                                z1 += _mm256_loadu_pd(&pz[4]);
+                            } else if (beta != 0.0) {
+                                y0 = _mm256_broadcast_sd(&beta);
+                                z0 += y0 * _mm256_loadu_pd(&pz[0]);
+                                z1 += y0 * _mm256_loadu_pd(&pz[4]);
+                            }
+                            _mm256_storeu_pd(&pz[0], z0);
+                            _mm256_storeu_pd(&pz[4], z1);
+                        }
+                        if ((nni - xnni) & 4) {
+                            const double *px0 = &pa[xnni * nnk];
+                            const double *py = &pb[xnnj * nnk];
+                            double *pz = &pc[xnni * 1 + xnnj * nnk2];
+                            z0 = _mm256_setzero_pd();
+                            for (size_t xk = 0; xk < nnk; xk++) {
+                                x0 = _mm256_loadu_pd(px0);
+                                z2 = _mm256_broadcast_sd(&py[xk]);
+                                z0 = _mm256_fmadd_pd(x0, z2, z0);
+                                px0 += 4;
+                                _mm_prefetch(&px0[64], _MM_HINT_T0);
+                            }
+                            if (alpha != 1.0)
+                                z0 *= _mm256_broadcast_sd(&alpha);
+                            if (kk != 0)
+                                z0 += _mm256_loadu_pd(&pz[0]);
+                            else if (beta != 0.0)
+                                z0 += _mm256_broadcast_sd(&beta) *
+                                      _mm256_loadu_pd(&pz[0]);
+                            _mm256_storeu_pd(&pz[0], z0);
+                            xnni += 4;
+                        }
+                        if ((nni - xnni) & 2) {
+                            __m128d w0, w1, w2, w3, wx0;
+                            const double *px0 = &pa[xnni * nnk];
+                            const double *py = &pb[xnnj * nnk];
+                            double *pz = &pc[xnni * 1 + xnnj * nnk2];
+                            w0 = _mm_setzero_pd();
+                            for (size_t xk = 0; xk < nnk; xk++) {
+                                wx0 = _mm_loadu_pd(px0);
+                                w0 = _mm_fmadd_pd(wx0, _mm_set1_pd(py[xk]), w0);
+                                px0 += 2;
+                                _mm_prefetch(&px0[64], _MM_HINT_T0);
+                            }
+                            if (alpha != 1.0)
+                                w0 *= _mm_set1_pd(alpha);
+                            if (kk != 0)
+                                w0 += _mm_loadu_pd(&pz[0]);
+                            else if (beta != 0.0)
+                                w0 += _mm_set1_pd(beta) * _mm_loadu_pd(&pz[0]);
+                            _mm_storeu_pd(&pz[0], w0);
+                            xnni += 2;
+                        }
+                        if ((nni - xnni) & 1) {
+                            const double *__restrict__ px0 = &pa[xnni * nnk];
+                            const double *__restrict__ py = &pb[xnnj * nnk];
+                            double *__restrict__ pz =
+                                &pc[xnni * 1 + xnnj * nnk2];
+                            double zz0 = 0.0;
+                            for (size_t xk = 0; xk < nnk; xk++)
+                                zz0 += px0[xk] * py[xk];
+                            zz0 *= alpha;
+                            if (kk != 0)
+                                pz[0] += zz0;
+                            else if (beta != 0.0)
+                                pz[0] = zz0 + beta * pz[0];
+                            else
+                                pz[0] = zz0;
+                        }
+                    }
+                }
             }
         }
     }
