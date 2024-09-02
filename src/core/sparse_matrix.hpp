@@ -1493,6 +1493,7 @@ template <typename S, typename FL> struct SparseMatrix {
     }
     void right_canonicalize(const shared_ptr<SparseMatrix> &lmat) {
         int nl = lmat->info->n, n = info->n;
+        cout << ".0" << endl;
         vector<MKL_INT> tmp(nl + 1, 0);
         for (int i = 0; i < n; i++) {
             int il = lmat->info->find_state(
@@ -1503,7 +1504,10 @@ template <typename S, typename FL> struct SparseMatrix {
         }
         for (int il = 0; il < nl; il++)
             tmp[il + 1] += tmp[il];
+        cout << ".1" << endl;
+        cout << (dalloc_<FP>() == nullptr) << endl;
         FL *dt = (FL *)dalloc_<FP>()->allocate(tmp[nl] * cpx_sz);
+        cout << ".2" << endl;
         vector<MKL_INT> it(nl, 0);
         for (int i = 0; i < n; i++) {
             int il = lmat->info->find_state(
@@ -1517,8 +1521,10 @@ template <typename S, typename FL> struct SparseMatrix {
                        inr * sizeof(FL));
             it[il] += inr * nxl;
         }
+        cout << ".3" << endl;
         for (int il = 0; il < nl; il++)
             assert(it[il] == tmp[il + 1] - tmp[il]);
+        cout << ".4" << endl;
         for (int il = 0; il < nl; il++) {
             MKL_INT nxl = lmat->info->n_states_bra[il],
                     nxr = (tmp[il + 1] - tmp[il]) / nxl;
@@ -1527,7 +1533,9 @@ template <typename S, typename FL> struct SparseMatrix {
                                      (*lmat)[il],
                                      GMatrix<FL>(dt + tmp[il], nxl, nxr));
         }
+        cout << ".5" << endl;
         memset(it.data(), 0, sizeof(MKL_INT) * nl);
+        cout << ".6" << endl;
         for (int i = 0; i < n; i++) {
             int il = lmat->info->find_state(
                 info->quanta[i].get_bra(info->delta_quantum));
@@ -1539,6 +1547,7 @@ template <typename S, typename FL> struct SparseMatrix {
                        dt + (tmp[il] + it[il] + k * nxr), inr * sizeof(FL));
             it[il] += inr * nxl;
         }
+        cout << ".7" << endl;
         dalloc_<FP>()->deallocate(dt, tmp[nl] * cpx_sz);
     }
     shared_ptr<SparseMatrix>
