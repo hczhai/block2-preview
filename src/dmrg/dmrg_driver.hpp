@@ -50,12 +50,14 @@ template <typename S, typename FL> struct DMRGDriver {
     shared_ptr<ParallelRule<S, FL>> prule = nullptr;
     DMRGDriver(size_t stack_mem, string scratch, string restart_dir = "",
                int n_threads = -1, bool clean_scratch = true,
-               double stack_mem_ratio = 0.4)
+               double stack_mem_ratio = 0.4, bool reset_frame = false)
         : clean_scratch(clean_scratch) {
-        if (frame_<FP>() == nullptr)
+        if (frame_<FP>() == nullptr || reset_frame) {
+            frame_<FP>() = nullptr;
             frame_<FP>() = make_shared<DataFrame<FP>>(
                 (size_t)(0.1 * stack_mem), (size_t)(0.9 * stack_mem), scratch,
                 stack_mem_ratio, stack_mem_ratio);
+        }
         frame_<FP>()->use_main_stack = false;
         frame_<FP>()->minimal_disk_usage = true;
         frame_<FP>()->fp_codec = make_shared<FPCodec<FP>>(1E-16, 1024);
