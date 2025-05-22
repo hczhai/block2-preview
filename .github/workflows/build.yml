@@ -551,7 +551,7 @@ jobs:
     strategy:
       matrix:
         os: [ ubuntu-24.04, macos-13, windows-2022, macos-14 ]
-        python: [ '3.7', '3.8', '3.9', '3.10', '3.11', '3.12', '3.13' ]
+        python: [ '3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.13t', '3.14-dev' ]
         manylinux: [ 2014 ]
         plat: [ x86_64, arm64 ]
         parallel: [ mpi, serial ]
@@ -564,14 +564,14 @@ jobs:
             plat: arm64
           - os: macos-14
             plat: x86_64
-          - os: macos-14
-            python: '3.7'
           - os: ubuntu-24.04
             plat: arm64
           - os: windows-2022
             parallel: mpi
           - os: windows-2022
             plat: arm64
+          - os: windows-2022
+            python: '3.14-dev'
       fail-fast: false
 
     steps:
@@ -624,8 +624,9 @@ jobs:
           $tagstr = ${env:TAG_STRING}.Substring(11)
           echo $tagstr
           sed -i "s/version=.*/version=`"${tagstr}`",/" setup.py
-          sed -i "/mkl/d" setup.py
-          sed -i "/scipy/d" setup.py
+          sed -i "s/version = .*/version = `"${tagstr}`"/" pyproject.toml
+          sed -i "/mkl/d" pyproject.toml
+          sed -i "/scipy/d" pyproject.toml
           sed -i "/DUSE_SINGLE_PREC/d" setup.py
           sed -i "/DUSE_MKL/c \                '-DUSE_MKL=OFF'," setup.py
           sed -i "/DBUILD_EXE/c \                '-DBUILD_EXE=OFF'," setup.py
@@ -657,10 +658,11 @@ jobs:
           export PATH=/usr/local/opt/gnu-sed/bin:$PATH
           echo ${TAG_STRING:11}
           gsed -i "s/version=.*/version='${TAG_STRING:11}',/" setup.py
+          gsed -i "s/version = .*/version = \"${TAG_STRING:11}\"/" pyproject.toml
           # if use mkl, will need iomp5
           gsed -i "/DUSE_MKL/a \                '-DOMP_LIB=OMP'," setup.py
-          gsed -i "/mkl/d" setup.py
-          gsed -i "/intel-openmp/d" setup.py
+          gsed -i "/mkl/d" pyproject.toml
+          gsed -i "/intel-openmp/d" pyproject.toml
           gsed -i "/DUSE_MKL/c \                '-DUSE_MKL=OFF'," setup.py
           gsed -i "/DUSE_MKL/a \                '-DFORCE_LIB_ABS_PATH=OFF'," setup.py
           export OMPROOT=$(brew --prefix libomp)
@@ -691,12 +693,13 @@ jobs:
           export OMPROOT=$(brew --prefix libomp)
           echo ${OMPROOT}
           gsed -i "s/version=.*/version='${TAG_STRING:11}',/" setup.py
+          gsed -i "s/version = .*/version = \"${TAG_STRING:11}\"/" pyproject.toml
           gsed -i "/DUSE_MKL/a \                '-DOMP_LIB=OMP'," setup.py
           gsed -i "/DUSE_MKL/a \                '-DARCH_ARM64=ON'," setup.py
           gsed -i "/DUSE_MKL/a \                '-DFORCE_LIB_ABS_PATH=OFF'," setup.py
           gsed -i "/DUSE_MKL/a \                '-DCMAKE_CXX_FLAGS=-I${OMPROOT}/include'," setup.py
-          gsed -i "/mkl/d" setup.py
-          gsed -i "/intel-openmp/d" setup.py
+          gsed -i "/mkl/d" pyproject.toml
+          gsed -i "/intel-openmp/d" pyproject.toml
           gsed -i "/DUSE_MKL/c \                '-DUSE_MKL=OFF'," setup.py
           cmake --version
           python -m pip install wheel delocate==0.10.7
@@ -713,6 +716,7 @@ jobs:
         run: |
           echo ${TAG_STRING:11}
           sed -i "s/version=.*/version='${TAG_STRING:11}',/" setup.py
+          sed -i "s/version = .*/version = \"${TAG_STRING:11}\"/" pyproject.toml
           cp ./.github/actions/build-wheel/Dockerfile.manylinux${{ matrix.manylinux }} ./.github/actions/build-wheel/Dockerfile
 
       - name: build wheels (manylinux)
@@ -756,6 +760,7 @@ jobs:
         run: |
           echo ${TAG_STRING:11}
           sed -i "s/version=.*/version='${TAG_STRING:11}',/" setup.py
+          sed -i "s/version = .*/version = \"${TAG_STRING:11}\"/" pyproject.toml
           python -m pip install pip build twine setuptools --upgrade
           python -m build --sdist
 
@@ -773,7 +778,9 @@ jobs:
           echo ${TAG_STRING:11}
           sed -i "/DUSE_MKL/a \                '-DMPI=ON'," setup.py
           sed -i "s/name=\"block2\"/name=\"block2-mpi\"/g" setup.py
+          sed -i "s/name = \"block2\"/name = \"block2-mpi\"/g" pyproject.toml
           sed -i "s/version=.*/version='${TAG_STRING:11}',/" setup.py
+          sed -i "s/version = .*/version = \"${TAG_STRING:11}\"/" pyproject.toml
           python -m build --sdist
           stat dist/block2_mpi-${TAG_STRING:11}.tar.gz
 
@@ -818,6 +825,7 @@ jobs:
         run: |
           echo ${TAG_STRING:11}
           sed -i "s/version=.*/version='${TAG_STRING:11}',/" setup.py
+          sed -i "s/version = .*/version = \"${TAG_STRING:11}\"/" pyproject.toml
           python -m pip install pip build twine setuptools --upgrade
           python -m build --sdist
 
@@ -839,7 +847,9 @@ jobs:
           echo ${TAG_STRING:11}
           sed -i "/DUSE_MKL/a \                '-DMPI=ON'," setup.py
           sed -i "s/name=\"block2\"/name=\"block2-mpi\"/g" setup.py
+          sed -i "s/name = \"block2\"/name = \"block2-mpi\"/g" pyproject.toml
           sed -i "s/version=.*/version='${TAG_STRING:11}',/" setup.py
+          sed -i "s/version = .*/version = \"${TAG_STRING:11}\"/" pyproject.toml
           python -m build --sdist
 
       - name: download wheels (mpi)
