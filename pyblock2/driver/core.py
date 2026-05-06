@@ -4525,6 +4525,9 @@ class DMRGDriver:
         return np.array(idx, dtype=int)
 
     def make_callback(self, kernel=None):
+        """
+        Internal method for making callback functions.
+        """
         CK = self.bw.b.CallbackKernel
 
         class Kernel(CK):
@@ -4538,6 +4541,13 @@ class DMRGDriver:
         return Kernel(kernel)
 
     def make_kernel(self, kernel=None):
+        """
+        Internal method for making kernel functions.
+
+        By default, the kernel computes b += beta * f(a).
+        Redefine the kernel function to do alternative computatinos.
+        xs is a list of extra inputs.
+        """
         EK = self.bw.bx.EffectiveKernel
 
         class Kernel(EK):
@@ -4655,9 +4665,16 @@ class DMRGDriver:
                 "NoPrecond". "Normal" will use the Olsen preconditioning, "DavidsonPrecond"
                 will use the Davidson preconditioning, and "NoPrecond" will not use any
                 preconditioning. Multiple values can be combined using "|". Default is None.
+                For targeting excited states above/below/near a given energy value
+                (in the Davidson space) using the standard Davidson algorithm,
+                "GreaterThan", "LessThan", or "CloseTo" can be used. For targeting excited
+                states above/below/near a given energy value using the harmonic Davidson
+                algorithm, "Harmonic|GreaterThan", "Harmonic|LessThan", or "Harmonic|CloseTo"
+                can be used. For non-Hermitian Hamiltonians, "NonHermitian|LeftEigen" and
+                "ExactNonHermitian|LeftEigen" can be used to compute left eigenstates.
             davidson_shift : float
                 Target Davidson eigenvalue when dav_type has "GreaterThan", "LessThan", or
-                "CloseTo". Default is 0.
+                "CloseTo", and optionally with "Harmonic". Default is 0.
             cutoff : float
                 States with eigenvalue below this number will be discarded,
                 even when the bond dimension is large enough to keep this state.
@@ -8187,6 +8204,21 @@ class DMRGDriver:
         return mps
 
     def get_spin_projection_npts(self, n_sites, n_elec, twos):
+        """
+        Compute the required number of Gauss-Legendre quadrature points for the spin projection MPO.
+
+        Args:
+            n_sites : int
+                Number of sites.
+            n_elec : int
+                Number of electrons.
+            twos : int
+                Two times total spin.
+
+        Returns:
+            npts : int
+                The minimal required number of Gauss-Legendre quadrature points.
+        """
         import numpy as np
 
         if n_elec <= n_sites:
