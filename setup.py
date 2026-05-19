@@ -111,7 +111,7 @@ class CMakeBuild(build_ext):
                     cmake_args += [
                         "-DCMAKE_GENERATOR_PLATFORM=%s" % plat,
                         "-G",
-                        "Visual Studio 17 2022",
+                        "Visual Studio 18 2026",
                     ]
                 else:
                     cmake_args += [
